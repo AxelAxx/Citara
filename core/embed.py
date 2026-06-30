@@ -1,10 +1,18 @@
 """Embedder: domain port + Ollama adapter + preflight (module 3, FR4 → AC5, AC7).
 
 The ``Embedder`` ABC is the domain boundary: ``retrieve.py`` and ``engine.py``
-depend on *this* abstraction, never on LangChain or Ollama (golden rule 1,
+depend on *this* abstraction, never on Ollama or HTTP (golden rule 1,
 dependencies point inward). ``OllamaEmbedder`` is the one concrete adapter; the
-heavy ``langchain``/``requests`` imports live here and are lazy, so the rest of
-``core/`` stays framework-free and importing this module is cheap.
+``requests`` import lives here and is lazy, so the rest of ``core/`` stays
+framework-free and importing this module is cheap.
+
+Why a direct HTTP call instead of an SDK: the ``ollama`` Python SDK (via
+``langchain-ollama``) routes embedding through an internal *runner* on an
+ephemeral, randomly-chosen port (``http://127.0.0.1:<random>/tokenize``) which
+refuses the connection in this environment, so ``embed_documents`` fails. The
+public ``POST /api/embed`` endpoint on the stable Ollama server port is
+verified-working (curl returns the 1024-dim bge-m3 vector in ~2s), so this
+adapter talks to that endpoint directly and depends on nothing but ``requests``.
 
 Two design points worth stating:
   * The embedding model name is taken **only** from the constructor (fed from
@@ -34,6 +42,18 @@ from core.models import (
 # Generous enough for a cold local server, short enough to fail fast if nothing
 # is listening on the port at all.
 _TAGS_TIMEOUT_SECONDS = 5
+
+# Embedding a batch is the slow path (CPU embedding of many chunks), so this is
+# far longer than the preflight: we want to wait out a real workload, not give up.
+_EMBED_TIMEOUT_SECONDS = 120
+
+# Max texts per /api/embed POST. Ollama starts an internal tokenizer runner (on
+# an ephemeral /tokenize port) to handle a request, and that runner collapses
+# under a single huge batch — sending the whole corpus at once fails, while a
+# handful of texts per call is verified-working. So embed_documents chunks the
+# input into batches of this size. Conservative on purpose; tune via the
+# constructor's batch_size if a host can take more.
+_EMBED_BATCH_SIZE = 16
 
 
 class Embedder(ABC):
@@ -68,11 +88,13 @@ def _model_is_available(requested: str, available: set[str]) -> bool:
 
 
 class OllamaEmbedder(Embedder):
-    """Embedder backed by LangChain's ``OllamaEmbeddings`` over local Ollama.
+    """Embedder backed by Ollama's stable ``POST /api/embed`` HTTP endpoint.
 
     ``model_name`` and ``ollama_base_url`` come from the ``VerticalConfig`` and
-    are the single source of truth for which model/endpoint to use. The
-    underlying LangChain client is injectable so tests never need a live server.
+    are the single source of truth for which model/endpoint to use. The adapter
+    calls the HTTP endpoint directly with ``requests`` (see the module docstring
+    for why the SDK/runner path is unusable here); tests mock ``requests.post``
+    so nothing touches the network.
     """
 
     def __init__(
@@ -80,12 +102,14 @@ class OllamaEmbedder(Embedder):
         model_name: str,
         ollama_base_url: str,
         *,
-        embeddings_client: object | None = None,
+        batch_size: int = _EMBED_BATCH_SIZE,
     ) -> None:
         self.model_name = model_name
         # Normalize once so URL joins are unambiguous regardless of config style.
         self.ollama_base_url = ollama_base_url.rstrip("/")
-        self._client = embeddings_client  # lazily built on first use if None
+        # Texts per /api/embed POST; small batches keep Ollama's tokenizer runner
+        # from overloading (see _EMBED_BATCH_SIZE). Injectable for host tuning.
+        self.batch_size = batch_size
 
     # --- preflight (AC7) -----------------------------------------------------
 
@@ -133,32 +157,93 @@ class OllamaEmbedder(Embedder):
     # --- embedding -----------------------------------------------------------
 
     def embed_documents(self, texts: list[str]) -> list[Embedding]:
-        return self._embeddings().embed_documents(texts)
+        # Ollama's /api/embed accepts a list in "input" and returns the
+        # embeddings in the same order — but a single huge batch overloads its
+        # internal tokenizer runner and the call fails (verified: a few texts per
+        # call works, the whole corpus at once does not). So we slice into small
+        # batches, POST one per batch, and concatenate; the result is identical
+        # to one big call — same length, same global input order.
+        result: list[Embedding] = []
+        for start in range(0, len(texts), self.batch_size):
+            batch = texts[start : start + self.batch_size]
+            result.extend(self._embed(batch))
+        return result
 
     def embed_query(self, text: str) -> Embedding:
-        return self._embeddings().embed_query(text)
+        # Same endpoint with a single string; Ollama still wraps the result in a
+        # list, so we unwrap the one vector here.
+        vectors = self._embed(text)
+        if not vectors:
+            raise RagEngineError(
+                f"Ollama /api/embed at '{self.ollama_base_url}' returned no "
+                "embedding for the query."
+            )
+        return vectors[0]
 
-    # --- lazy adapter wiring -------------------------------------------------
+    # --- HTTP call to the stable /api/embed endpoint -------------------------
 
-    def _embeddings(self):
-        if self._client is None:
-            self._client = self._build_client()
-        return self._client
+    def _embed(self, model_input: str | list[str]) -> list[Embedding]:
+        """POST to /api/embed and return the ``embeddings`` list (order preserved).
 
-    def _build_client(self):
-        # Prefer the dedicated langchain-ollama package; fall back to the
-        # (deprecated) community location so either install works.
+        We hit the server's stable HTTP endpoint directly rather than going
+        through the ollama/langchain-ollama SDK: that SDK proxies embedding to an
+        internal runner on an ephemeral port that refuses the connection here,
+        whereas this endpoint is verified-working. See the module docstring.
+        """
+        requests = self._http()
+        url = f"{self.ollama_base_url}/api/embed"
+        body = {"model": self.model_name, "input": model_input}
         try:
-            from langchain_ollama import OllamaEmbeddings
-        except ImportError:
-            try:
-                from langchain_community.embeddings import OllamaEmbeddings
-            except ImportError as exc:
-                raise RagEngineError(
-                    "langchain-ollama (or langchain-community) is required to "
-                    "embed. Install it with `pip install -r requirements.txt`."
-                ) from exc
-        return OllamaEmbeddings(model=self.model_name, base_url=self.ollama_base_url)
+            response = requests.post(url, json=body, timeout=_EMBED_TIMEOUT_SECONDS)
+        except (requests.exceptions.RequestException, OSError) as exc:
+            # Connection refused / DNS / timeout — the server isn't answering.
+            raise OllamaUnreachableError(
+                f"Cannot reach Ollama at '{self.ollama_base_url}'. "
+                "Start it with `ollama serve` and verify the base URL."
+            ) from exc
+
+        if response.status_code != 200:
+            detail = self._error_detail(response)
+            lowered = detail.lower()
+            # Ollama answers an unknown model with a "not found, try pulling it"
+            # error; surface that as the actionable model error, not a generic one.
+            if "not found" in lowered or "pull" in lowered:
+                raise ModelNotPulledError(
+                    f"Embedding model '{self.model_name}' is not available in "
+                    f"Ollama (/api/embed → HTTP {response.status_code}: {detail}). "
+                    f"Pull it first: `ollama pull {self.model_name}`."
+                )
+            raise RagEngineError(
+                f"Ollama /api/embed at '{self.ollama_base_url}' returned HTTP "
+                f"{response.status_code}: {detail}."
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RagEngineError(
+                f"Ollama /api/embed at '{self.ollama_base_url}' returned a "
+                "non-JSON response. Verify it is really Ollama."
+            ) from exc
+
+        embeddings = payload.get("embeddings") if isinstance(payload, dict) else None
+        if embeddings is None:
+            raise RagEngineError(
+                f"Ollama /api/embed at '{self.ollama_base_url}' returned no "
+                "'embeddings' key. Verify the server version and model."
+            )
+        return embeddings
+
+    @staticmethod
+    def _error_detail(response) -> str:
+        """Best-effort human-readable reason from a non-200 /api/embed response."""
+        try:
+            body = response.json()
+        except ValueError:
+            return (getattr(response, "text", "") or "").strip() or "<no body>"
+        if isinstance(body, dict) and "error" in body:
+            return str(body["error"])
+        return str(body)
 
     @staticmethod
     def _http():
@@ -166,7 +251,7 @@ class OllamaEmbedder(Embedder):
             import requests
         except ImportError as exc:
             raise RagEngineError(
-                "requests is required for the Ollama preflight. "
+                "requests is required to reach Ollama. "
                 "Install it with `pip install -r requirements.txt`."
             ) from exc
         return requests
