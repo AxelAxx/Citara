@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from core.embed import Embedder
 from core.models import (
     Chunk,
     ChunkMetadata,
@@ -41,6 +42,13 @@ from core.models import (
     Vertical,
     VerticalConfig,
 )
+from core.store import VectorStore, flatten_metadata
+
+# Importing the Embedder *port* and the VectorStore here is safe: neither imports
+# ingest.py, so there is no cycle. Crucially, persist() depends on these
+# abstractions and receives them *injected* — the driver never builds a concrete
+# adapter inside its logic. The one concrete adapter (OllamaEmbedder) is reached for
+# only in main(), the offline composition root (see bottom of file).
 
 # --- document_id derivation --------------------------------------------------
 # Official-id pattern (e.g. BOE-A-2015-11430). This is generic provenance logic,
@@ -297,6 +305,44 @@ def _ingest_source(
     return out
 
 
+# --- persistence: embed -> upsert (FR4, FR5 → AC1) ---------------------------
+
+
+def persist(result: IngestionResult, embedder: Embedder, store: VectorStore) -> int:
+    """Embed the ingested Chunks and upsert them into the VectorStore. Returns the
+    number of vectors written.
+
+    This is the loop that was promised by ``ingest()``'s scope note: it completes
+    the offline pipeline. ``embedder`` and ``store`` are **injected** on purpose —
+    the ingestion *driver* orchestrates its own pipeline, but it must not couple to
+    concrete adapters (golden rule 1); the composition root (``main()``) supplies
+    them. Keeping this here, not on ``RagEngine``, also keeps the online query
+    engine ignorant of vector writes: ingest (offline/batch) and query
+    (online/cached) are different lifecycles.
+
+    Idempotency (AC1) rides on the deterministic ``chunk_id``s: ``store.upsert``
+    overwrites same-id rows instead of duplicating, so re-running this is safe.
+    The embedding here uses the *same* Embedder the query path uses (built from the
+    same ``VerticalConfig.embedding_model``), so ingest and query can never embed
+    with different models and silently break retrieval (golden rule 4).
+    """
+    if not result.chunks:
+        return 0  # nothing produced (caller already guards the empty-Corpus case)
+
+    # Parallel lists, positionally paired — the contract store.upsert expects.
+    ids = [item.chunk_id for item in result.chunks]
+    texts = [item.chunk.text for item in result.chunks]
+    # Reuse the store's single flattening site (Path->str, Vertical->value, drop
+    # None); never re-implement that boundary here.
+    metadatas = [flatten_metadata(item.chunk.metadata) for item in result.chunks]
+
+    # Embed in one batch, then upsert. embed_documents preserves input order, so the
+    # vectors line up with ids/texts/metadatas by position.
+    embeddings = embedder.embed_documents(texts)
+    store.upsert(ids, texts, embeddings, metadatas)
+    return len(ids)
+
+
 # --- minimal config boundary + CLI -------------------------------------------
 # TODO(module 9 / config): a dedicated config loader will own YAML parsing and
 # validation. The helper below is the minimal boundary the ingest CLI needs
@@ -346,12 +392,29 @@ def main(argv: list[str] | None = None) -> int:
     config = _load_vertical_config(Vertical(args.vertical))
     result = ingest(config)
 
-    # NOTE: persistence (embedding + upsert into the VectorStore) is module 4 +
-    # engine.py wiring. This driver reports what it produced and stops.
+    # main() is the composition root for the OFFLINE pipeline: it builds the concrete
+    # adapters and injects them into persist(), the symmetric counterpart of
+    # engine.from_vertical_config for the ONLINE query path. OllamaEmbedder is
+    # imported locally so adapter instantiation stays at this entry point, never in
+    # the driver's reusable logic.
+    from core.embed import OllamaEmbedder
+
+    embedder = OllamaEmbedder(
+        model_name=config.embedding_model,
+        ollama_base_url=config.ollama_base_url,
+    )
+    # Fail fast BEFORE embedding (NFR6/AC7): Ollama unreachable or the embedding
+    # model not pulled surfaces now with an actionable message, not halfway through
+    # the batch with a corrupt, partially-written Collection.
+    embedder.check_health()
+
+    store = VectorStore(collection_name=config.collection_name)
+    written = persist(result, embedder, store)
+
     print(
         f"Ingested vertical '{config.vertical.value}': "
-        f"{result.documents} SourceDocuments -> {result.chunk_count} Chunks "
-        f"(deterministic ids ready for upsert)."
+        f"{result.documents} SourceDocuments -> {result.chunk_count} Chunks -> "
+        f"{written} vectors persisted in Collection '{config.collection_name}'."
     )
     return 0
 

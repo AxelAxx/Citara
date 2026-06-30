@@ -1,0 +1,179 @@
+"""Unit tests for the Retriever (module 5, FR6 → AC2, AC6).
+
+No live Ollama or Chroma: the Embedder port and the VectorStore are both faked, so
+the test asserts the *contract* — top_k Chunks in relevance order, each carrying a
+correctly-typed ChunkMetadata rebuilt from Chroma's flat dict (Vertical/Path, not
+str), ``where`` forwarded verbatim, ``embed_query`` called with the Query text
+(same-model-by-construction), and corrupt metadata failing fast (RetrievalError).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from core.embed import Embedder
+from core.models import Chunk, Query, RetrievalError, Vertical
+from core.retrieve import Retriever, rebuild_metadata
+from core.store import QueryHit, VectorStore
+
+
+class _FakeEmbedder(Embedder):
+    """Records the text it embedded and returns a fixed query vector."""
+
+    def __init__(self, vector=None) -> None:
+        self.embed_query_calls: list[str] = []
+        self._vector = vector or [0.1, 0.2, 0.3]
+
+    def embed_documents(self, texts):  # unused on the query path
+        raise AssertionError("retrieve() must use embed_query, not embed_documents")
+
+    def embed_query(self, text: str):
+        self.embed_query_calls.append(text)
+        return self._vector
+
+
+class _FakeVectorStore(VectorStore):
+    """VectorStore whose ``query`` replays canned hits and records its arguments."""
+
+    def __init__(self, hits: list[QueryHit]) -> None:
+        # Bypass VectorStore.__init__ (no real Chroma client) on purpose.
+        self._hits = hits
+        self.query_calls: list[dict] = []
+
+    def query(self, embedding, top_k, where=None):
+        self.query_calls.append({"embedding": embedding, "top_k": top_k, "where": where})
+        return self._hits
+
+
+def _hit(doc_id: str, page: int, text: str, **extra) -> QueryHit:
+    metadata = {"document_id": doc_id, "page": page, **extra}
+    return QueryHit(id=f"{doc_id}-{page}", text=text, metadata=metadata)
+
+
+def _make_retriever(hits, embedder=None):
+    embedder = embedder or _FakeEmbedder()
+    store = _FakeVectorStore(hits)
+    return Retriever(embedder, store), embedder, store
+
+
+# --- top_k and order (AC6) ---------------------------------------------------
+
+
+def test_retrieve_returns_exactly_top_k_chunks_in_order():
+    hits = [
+        _hit("doc-a", 1, "primero"),
+        _hit("doc-b", 2, "segundo"),
+        _hit("doc-c", 3, "tercero"),
+    ]
+    retriever, _, store = _make_retriever(hits)
+
+    context = retriever.retrieve(Query(text="¿plazo?"), top_k=3)
+
+    assert len(context) == 3
+    assert all(isinstance(c, Chunk) for c in context)
+    # Relevance order preserved exactly as the store returned it.
+    assert [c.text for c in context] == ["primero", "segundo", "tercero"]
+    assert [c.metadata.document_id for c in context] == ["doc-a", "doc-b", "doc-c"]
+    # top_k flows through to the store unchanged.
+    assert store.query_calls[0]["top_k"] == 3
+
+
+# --- metadata reconstruction: rich types, not str (AC2 provenance) -----------
+
+
+def test_retrieve_rebuilds_richly_typed_metadata():
+    hits = [
+        _hit(
+            "BOE-A-2015-11430",
+            7,
+            "texto",
+            section="Artículo 3",
+            vertical="legal",  # str on the wire -> Vertical
+            source_path="data/legal/boe.pdf",  # str on the wire -> Path
+        )
+    ]
+    retriever, _, _ = _make_retriever(hits)
+
+    [chunk] = retriever.retrieve(Query(text="x"), top_k=1)
+    md = chunk.metadata
+
+    assert md.document_id == "BOE-A-2015-11430"
+    assert md.page == 7
+    assert md.section == "Artículo 3"
+    # The inverse-flatten boundary: domain types restored, not left as str.
+    assert md.vertical is Vertical.LEGAL
+    assert isinstance(md.source_path, Path)
+    assert md.source_path == Path("data/legal/boe.pdf")
+
+
+def test_retrieve_leaves_absent_optionals_as_none():
+    retriever, _, _ = _make_retriever([_hit("doc", 1, "t")])  # only mandatory keys
+
+    [chunk] = retriever.retrieve(Query(text="x"), top_k=1)
+
+    assert chunk.metadata.section is None
+    assert chunk.metadata.vertical is None
+    assert chunk.metadata.source_path is None
+
+
+# --- where forwarding and same-model-by-construction -------------------------
+
+
+def test_where_is_forwarded_verbatim_to_the_store():
+    retriever, _, store = _make_retriever([_hit("doc", 1, "t")])
+    where = {"document_id": "doc"}
+
+    retriever.retrieve(Query(text="x"), top_k=5, where=where)
+
+    assert store.query_calls[0]["where"] == where
+
+
+def test_embed_query_called_with_query_text():
+    embedder = _FakeEmbedder()
+    retriever, _, store = _make_retriever([_hit("doc", 1, "t")], embedder=embedder)
+
+    retriever.retrieve(Query(text="¿cuál es el plazo de recurso?"), top_k=5)
+
+    # Same model as ingestion (golden rule 4) verified by construction: the Query
+    # text reaches embed_query, and that embedding is what the store searches with.
+    assert embedder.embed_query_calls == ["¿cuál es el plazo de recurso?"]
+    assert store.query_calls[0]["embedding"] == embedder._vector
+
+
+# --- fail-fast on corrupt metadata (NFR6) ------------------------------------
+
+
+def test_hit_missing_page_raises_retrieval_error():
+    bad = QueryHit(id="x", text="t", metadata={"document_id": "doc"})  # no page
+    retriever, _, _ = _make_retriever([bad])
+
+    with pytest.raises(RetrievalError):
+        retriever.retrieve(Query(text="x"), top_k=1)
+
+
+def test_hit_missing_document_id_raises_retrieval_error():
+    bad = QueryHit(id="x", text="t", metadata={"page": 1})  # no document_id
+    retriever, _, _ = _make_retriever([bad])
+
+    with pytest.raises(RetrievalError):
+        retriever.retrieve(Query(text="x"), top_k=1)
+
+
+# --- rebuild_metadata is the exact mirror of flatten_metadata ----------------
+
+
+def test_rebuild_metadata_round_trips_flatten():
+    from core.models import ChunkMetadata
+    from core.store import flatten_metadata
+
+    original = ChunkMetadata(
+        document_id="doc-1",
+        page=4,
+        section="Sección 2",
+        vertical=Vertical.HEALTH,
+        source_path=Path("data/health/guia.pdf"),
+    )
+
+    assert rebuild_metadata(flatten_metadata(original)) == original

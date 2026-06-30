@@ -21,15 +21,19 @@ from core.ingest import (
     derive_document_id,
     discover_corpus,
     ingest,
+    IngestionResult,
     make_chunk_id,
+    persist,
 )
 from core.models import (
+    Chunk,
     ChunkMetadata,
     EmptyCorpusError,
     SourceDocument,
     Vertical,
     VerticalConfig,
 )
+from pathlib import Path
 
 
 def _word_len(text: str) -> int:
@@ -180,7 +184,119 @@ def test_document_loader_reads_pages_and_preserves_page_numbers(monkeypatch, tmp
 
 
 def test_derive_document_id_official_vs_slug(tmp_path):
-    from pathlib import Path
-
     assert derive_document_id(Path("BOE-A-2015-11430.pdf")) == "BOE-A-2015-11430"
     assert derive_document_id(Path("Guia Clinica 2021.pdf")) == "guia-clinica-2021"
+
+
+# --- persist(): embed -> upsert wiring (FR4, FR5 → AC1) ----------------------
+# Embedder and VectorStore are faked: no Ollama, no Chroma. These tests close AC1
+# for real — that ingestion actually persists, idempotently, with the same model.
+
+
+class _FakeEmbedder:
+    """Records the texts it embedded; returns a distinct vector per text, in order."""
+
+    def __init__(self) -> None:
+        self.embed_calls: list[list[str]] = []
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.embed_calls.append(texts)
+        return [[float(i), 0.0] for i, _ in enumerate(texts)]
+
+    def embed_query(self, text: str):  # persist must never use the query path
+        raise AssertionError("persist() must embed documents, not queries")
+
+
+class _FakeStore:
+    """Records upsert/add calls; ``add`` must stay empty (upsert, never add — AC1)."""
+
+    def __init__(self) -> None:
+        self.upsert_calls: list[dict] = []
+        self.add_calls: list[tuple] = []
+
+    def upsert(self, ids, texts, embeddings, metadatas) -> None:
+        self.upsert_calls.append(
+            {"ids": ids, "texts": texts, "embeddings": embeddings, "metadatas": metadatas}
+        )
+
+    def add(self, *args, **kwargs) -> None:
+        self.add_calls.append((args, kwargs))
+
+
+def _ingested(doc_id: str, page: int, index: int, text: str, **md) -> IngestedChunk:
+    chunk = Chunk(text=text, metadata=ChunkMetadata(document_id=doc_id, page=page, **md))
+    return IngestedChunk(chunk_id=make_chunk_id(doc_id, page, index), chunk=chunk)
+
+
+def test_persist_embeds_texts_and_upserts_deterministic_ids():
+    items = [
+        _ingested("doc-a", 1, 0, "uno", vertical=Vertical.HEALTH, source_path=Path("data/health/a.pdf")),
+        _ingested("doc-a", 1, 1, "dos", section="Sección 2"),
+    ]
+    result = IngestionResult(documents=1, chunks=items)
+    embedder = _FakeEmbedder()
+    store = _FakeStore()
+
+    written = persist(result, embedder, store)
+
+    assert written == 2
+    # The chunk texts are embedded once, in order — and via embed_documents, the
+    # SAME model the query path uses (rule 4), never embed_query.
+    assert embedder.embed_calls == [["uno", "dos"]]
+
+    # upsert, never add (AC1): re-running overwrites same-id rows, no duplicates.
+    assert store.add_calls == []
+    assert len(store.upsert_calls) == 1
+    call = store.upsert_calls[0]
+    assert call["ids"] == [make_chunk_id("doc-a", 1, 0), make_chunk_id("doc-a", 1, 1)]
+    assert call["texts"] == ["uno", "dos"]
+    # Embeddings line up positionally with the texts the fake returned.
+    assert call["embeddings"] == [[0.0, 0.0], [1.0, 0.0]]
+
+
+def test_persist_reuses_flatten_metadata_so_upsert_gets_primitives():
+    items = [
+        _ingested("doc-a", 1, 0, "uno", vertical=Vertical.HEALTH, source_path=Path("data/health/a.pdf")),
+        _ingested("doc-a", 1, 1, "dos", section="Sección 2"),
+    ]
+    store = _FakeStore()
+
+    persist(IngestionResult(documents=1, chunks=items), _FakeEmbedder(), store)
+    metadatas = store.upsert_calls[0]["metadatas"]
+
+    # store.flatten_metadata reused: Path->str, Vertical->value, None dropped.
+    assert metadatas[0] == {
+        "document_id": "doc-a",
+        "page": 1,
+        "vertical": "health",
+        "source_path": str(Path("data/health/a.pdf")),
+    }
+    assert metadatas[1] == {"document_id": "doc-a", "page": 1, "section": "Sección 2"}
+    # Every value is a Chroma-safe primitive — no Path, no Enum leaks through.
+    assert all(
+        isinstance(v, (str, int, float, bool)) for md in metadatas for v in md.values()
+    )
+
+
+def test_persist_is_idempotent_at_id_level():
+    # AC1 for real: two persist() runs of the same result upsert the SAME ids.
+    items = [_ingested("doc", 2, 0, "texto")]
+    result = IngestionResult(documents=1, chunks=items)
+    store = _FakeStore()
+
+    persist(result, _FakeEmbedder(), store)
+    persist(result, _FakeEmbedder(), store)
+
+    assert store.upsert_calls[0]["ids"] == store.upsert_calls[1]["ids"] == [
+        make_chunk_id("doc", 2, 0)
+    ]
+    assert store.add_calls == []  # always upsert, never add
+
+
+def test_persist_empty_result_writes_nothing():
+    embedder = _FakeEmbedder()
+    store = _FakeStore()
+
+    assert persist(IngestionResult(documents=0, chunks=[]), embedder, store) == 0
+    assert embedder.embed_calls == []  # no embedding call on an empty batch
+    assert store.upsert_calls == []
