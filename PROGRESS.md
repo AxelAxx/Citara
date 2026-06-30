@@ -14,16 +14,16 @@
 |------|--------|--------|-------|
 | Dominio | `core/models.py` | ✅ Hecho | — |
 | Dominio | `core/ingest.py` | ✅ Hecho (+ persistencia cableada) | 11 |
-| Dominio | `core/embed.py` | ✅ Hecho (HTTP directo a `/api/embed`) | — |
+| Dominio | `core/embed.py` | ✅ Hecho (HTTP directo a `/api/embed` + batching) | 12 |
 | Dominio | `core/store.py` | ✅ Hecho | 13 |
 | Dominio | `core/retrieve.py` | ✅ Hecho | 8 |
-| Dominio | `core/generate.py` | ✅ Hecho (⚠️ aún usa `ChatOllama`, ver riesgos) | — |
-| Aplicación | `core/engine.py` | ✅ Hecho | — |
-| Presentación | `app.py` | ✅ Hecho (sin validar en vivo) | n/a (UI) |
-| Config | `config/health.yaml` | ✅ Hecho (prompt revisado) | — |
+| Dominio | `core/generate.py` | ✅ Hecho (HTTP directo a `/api/chat`) | 12 |
+| Aplicación | `core/engine.py` | ✅ Hecho | 7 |
+| Presentación | `app.py` | ✅ Hecho (validado en vivo end-to-end) | n/a (UI) |
+| Config | `config/health.yaml` | ✅ Hecho (validado en vivo sobre corpus real) | — |
 | Config | `config/legal.yaml` | ⬜ Pendiente | — |
 
-**Tests totales: 60 verdes.** Suite sin dependencias vivas (mocks de Ollama/Chroma).
+**Tests totales: 63 verdes.** Suite sin dependencias vivas (mocks de Ollama/Chroma).
 
 **Repo:** GitHub `AxelAxx/Citara` — privado hasta fijar licencia.
 
@@ -31,9 +31,11 @@
 
 ## Hito actual
 
-Primera ejecución real end-to-end. Embedding contra Ollama **verificado en vivo**
-(`embed_query` devuelve vector de 1024 dims, idéntico al de `curl`). Siguiente:
-ingesta real del corpus health → `streamlit run app.py`.
+**Motor validado end-to-end sobre corpus health real.** Ingesta idempotente
+confirmada en vivo (AC1 ✅); Qwen responde en español citando guías reales
+(AC2 ✅) y se abstiene ante preguntas fuera de corpus (AC3 ✅), todo por HTTP
+directo contra Ollama (`/api/embed` + `/api/chat`, sin LangChain en la inferencia).
+Siguiente: segunda vertical `legal` (BOE) para demostrar G1 y cerrar AC4.
 
 ---
 
@@ -72,33 +74,35 @@ ingesta real del corpus health → `streamlit run app.py`.
 - **B-02 — La ingesta no persistía.** El CLI producía `IngestedChunk` pero nunca embebía ni hacía upsert (cableado diferido y olvidado). Resuelto con `persist()` inyectado (D-01). Cierra AC1 de verdad.
 - **B-03 — `/tokenize` connection refused en embedding.** ⭐ El bueno.
   - **Síntoma:** `python -m core.ingest` petaba en `embed_documents` con `Post http://127.0.0.1:<puerto-efímero>/tokenize: connection refused`.
-  - **Diagnóstico:** aislé el servidor con `curl`/`Invoke-RestMethod` a `/api/embed` → **funcionaba** (vector 1024 dims en 2s). Luego el SDK `ollama` vía `langchain-ollama` → fallaba. Conclusión: el problema es la capa cliente (SDK bleeding-edge vs servidor estable), no Ollama ni mi código. El pipeline parseaba y troceaba bien; reventaba solo en la llamada del SDK.
-  - **Intentos descartados:** bajar `langchain-ollama` (no bastó, el culpable era el SDK `ollama` de debajo). Evité seguir bajando versiones a ciegas.
-  - **Solución:** reimplementar `OllamaEmbedder` para hablar **directamente** a `POST /api/embed` con `requests`, eliminando el SDK del camino de embedding. El puerto `Embedder` no cambió; solo la implementación del adapter. Más robusto (no acoplado a versiones del SDK) y verificado en vivo.
-  - **Narrativa de entrevista:** "aislé con curl que el servidor funcionaba, deduje que era la capa cliente, y reimplementé el adapter contra el endpoint HTTP estable en vez de pelear con versiones."
+  - **Diagnóstico (corregido):** la primera hipótesis fue "capa cliente": aislé el servidor con `curl`/`Invoke-RestMethod` a `/api/embed` → **funcionaba** (vector 1024 dims en 2s), y el SDK `ollama` vía `langchain-ollama` fallaba, así que migré a HTTP directo. Pero seguía petando. La **causa raíz real era el VOLUMEN del batch**: la ingesta llamaba `embed_documents` con los **4462 chunks del corpus en una sola petición**, y Ollama, ante un batch masivo, arranca un runner de tokenización interno (`/tokenize` en puerto efímero) que se cae bajo esa carga. No era el SDK: era mandar todo de golpe.
+  - **Aislamiento de la causa:** 1-2 textos por `/api/embed` funcionan; un único texto de 2000 tokens funciona; **solo** falla el batch entero desde el código. Eso descartó el modelo, el contenido y el endpoint, y señaló al tamaño de la petición.
+  - **Solución:** trocear `embed_documents` en **lotes pequeños (`_EMBED_BATCH_SIZE = 16`)**, un `POST /api/embed` por lote, concatenando los vectores en orden global. Quedó además el HTTP directo (en vez del SDK), que es robusto frente a versiones; pero **el fix que destrabó la ingesta fue el batching**, no el cambio de cliente. El puerto `Embedder` no cambió.
+  - **Narrativa de entrevista:** "el primer diagnóstico (culpar al SDK) era incompleto; bisecté por tamaño de petición —1 texto ok, 2000 tokens ok, 4462 de golpe no— y vi que el verdadero detonante era el volumen saturando el runner de tokenización. Lo resolví troceando en lotes, no peleando con versiones. Lección: confirmar la causa raíz por bisección antes de dar por cerrado el diagnóstico."
 - **B-04 — Confusión de terminales / venv.** Varios fallos por correr `python` sin el venv activado (caía al stub de Microsoft Store). Regla: confirmar `(Citara)` en el prompt antes de cualquier comando `python`.
+- **B-05 — `AttributeError: module 'langchain' has no attribute 'verbose'` en generación.**
+  - **Síntoma:** al generar con Qwen, `ChatOllama` reventaba con `AttributeError` sobre `langchain.verbose`.
+  - **Diagnóstico:** efecto colateral del downgrade del embedding (B-03). Al bajar `langchain-core` a 0.3.x quedó **descompasado** con `langchain 1.3.11`; `ChatOllama` lee `langchain.verbose`, que **ya no existe en langchain 1.x**. Choque de versiones de LangChain, no un fallo de Ollama.
+  - **Solución:** eliminar `ChatOllama` y hablar `POST /api/chat` por HTTP directo con `requests` (coherente con B-03 en `embed.py`). **`core/` ya NO depende de LangChain para inferencia** — solo de `langchain-text-splitters` para el `Chunker`. Menos superficie de versiones volátiles.
 
 ---
 
 ## Riesgos abiertos / a vigilar
 
-- **`generate.py` usa `ChatOllama`** de langchain-ollama. Cuando se generen respuestas con Qwen, puede saltar **el mismo `/tokenize`** que el embedding (B-03). Receta lista: reimplementar el `Generator` contra `/api/chat` por HTTP directo si pasa.
-- **Posible código muerto en `embed.py`** tras el merge del fix B-03 (restos del adapter langchain en `_embed`). Verificar y limpiar.
-- **Rendimiento en Pascal:** la RTX 1080 va más lenta que GPUs modernas; usable para chat, no de vértigo.
+- ✅ ~~**`generate.py` usa `ChatOllama`**~~ **RESUELTO (B-05).** `Generator` reimplementado contra `/api/chat` por HTTP directo; LangChain fuera del camino de inferencia.
+- ✅ ~~**Posible código muerto en `embed.py`**~~ **RESUELTO.** El adapter quedó limpio tras los fixes B-03 (HTTP directo + batching); sin restos del cliente langchain.
+- **Rendimiento en RTX 1080 (Pascal):** la GPU es lenta frente a generaciones modernas; usable para chat, pero la respuesta de Qwen tarda. **Mejora futura:** streaming de respuestas (`"stream": true` en `/api/chat` + `st.write_stream` en la UI) para que el usuario vea tokens según se generan en vez de esperar la respuesta completa. No bloquea el MVP.
 - **Versiones flotantes** en `requirements.txt`: fijar con `==` antes de publicar.
 
 ---
 
 ## Siguientes pasos (orden)
 
-1. ⏳ **Ingesta real** `python -m core.ingest --vertical health` → confirmar `N vectors persisted` y `chroma_db/` creado.
-2. **Commit** del fix de embed (`fix(embed): call Ollama /api/embed over HTTP directly [FR4]`).
-3. **Validar AC1**: segunda ingesta → mismo nº de chunks, sin duplicar (idempotencia real).
-4. **`streamlit run app.py`** → primera respuesta en vivo. Validar AC2 (respuesta + citas) y AC3 (abstención).
-   - Tener listas preguntas de prueba: 2-3 dentro del corpus + 1 fuera (para la abstención).
-   - Si Qwen peta con `/tokenize` → aplicar receta de `/api/chat` directo.
-5. **Iterar el `system_prompt`** de health con preguntas reales (aquí está el valor del proyecto).
-6. **`config/legal.yaml`** + corpus legal → demostrar G1 (mismo motor, 2 verticales, cero diff en `core/`).
+1. ✅ **Ingesta real** `python -m core.ingest --vertical health` → vectores persistidos, `chroma_db/` creado.
+2. ✅ **Commit** del fix de embed (HTTP directo `/api/embed` + batching).
+3. ✅ **AC1 validado**: segunda ingesta idempotente (mismo nº de chunks, sin duplicar).
+4. ✅ **`streamlit run app.py`** → respuesta en vivo. AC2 (respuesta + citas) y AC3 (abstención) validados.
+5. ⏳ **Iterar el `system_prompt`** de health con preguntas reales (aquí está el valor del proyecto).
+6. ⏳ **`config/legal.yaml`** + corpus legal → demostrar G1 (mismo motor, 2 verticales, cero diff en `core/`) y cerrar AC4. **(en curso)**
 7. **Auto-ingesta en la UI** (D-05): botón / auto-detección con loading.
 8. **Pulido final:** UI sobre Streamlit, mascota (icono), README + GIF de demo, `DECISIONS.md`, licencia AGPL, fijar versiones, repo público.
 
@@ -106,9 +110,9 @@ ingesta real del corpus health → `streamlit run app.py`.
 
 ## Criterios de aceptación — checklist
 
-- [ ] AC1 — ingesta persiste + idempotente (pendiente de validar en vivo)
-- [ ] AC2 — respuesta con ≥1 cita correcta (doc + página)
-- [ ] AC3 — abstención ante pregunta fuera de corpus
+- [x] AC1 — ingesta persiste + idempotente — **validado en vivo sobre corpus health real**
+- [x] AC2 — respuesta con ≥1 cita correcta (doc + página) — **validado en vivo (Qwen cita guías reales en español)**
+- [x] AC3 — abstención ante pregunta fuera de corpus — **validado en vivo**
 - [ ] AC4 — cambio de vertical sin diff en `core/` (requiere legal.yaml)
 - [ ] AC5 — modo avión: sin llamadas externas
 - [x] AC6 — pytest verde (Chunker, Citation, Retriever con mocks) — **60 tests**
