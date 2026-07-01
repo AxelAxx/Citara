@@ -4,6 +4,11 @@ display_name: "Asistente de normativa legal"
 corpus_path: "data/legal"
 collection_name: "legal_boe"
 
+# Retriever recall: 8 (up from the default 5). Some questions whose relevant
+# chunk fell just outside the top-5 were abstaining incorrectly; widening the
+# window recovers them. Query-time only — no re-ingest needed.
+top_k: 8
+
 # SystemPrompt: enforces Grounding, Abstention, citation format, Spanish output.
 # Rules are identical across verticals; only tone/domain framing differs (here:
 # juridical tone, referring to "documentos legales / normativa" instead of
