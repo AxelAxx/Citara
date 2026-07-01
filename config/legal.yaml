@@ -4,10 +4,11 @@ display_name: "Asistente de normativa legal"
 corpus_path: "data/legal"
 collection_name: "legal_boe"
 
-# Retriever recall: 8 (up from the default 5). Some questions whose relevant
-# chunk fell just outside the top-5 were abstaining incorrectly; widening the
-# window recovers them. Query-time only — no re-ingest needed.
-top_k: 8
+# Retriever window: 6 — the recall/precision balance. Above the default 5 so
+# relevant chunks that fell just outside the top-5 aren't missed, but back down
+# from 8, where neighbouring low-relevance chunks added noise that degraded core
+# answers. Query-time only — no re-ingest needed.
+top_k: 6
 
 # SystemPrompt: enforces Grounding, Abstention, citation format, Spanish output.
 # Rules are identical across verticals; only tone/domain framing differs (here:
