@@ -33,6 +33,9 @@ Zero vertical logic here: every legal/health difference lives in the
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
+
 from core.embed import _model_is_available  # shared model-match rule; keep one source
 from core.models import (
     Answer,
@@ -104,6 +107,43 @@ class Generator:
         # non-abstaining Answer with no citations, so grounding can't silently slip.
         citations = self._citations_from_context(context)
         return Answer(text=text, citations=citations)
+
+    def generate_stream(self, query: Query, context: RetrievedContext) -> Iterator[str]:
+        """Stream the grounded reply as text fragments, yielded as the LLM emits them.
+
+        Why this exists: on local hardware (e.g. an RTX 1080) a full reply can take
+        1–2 minutes to generate. Streaming does **not** make generation faster — it
+        replaces a long, silent spinner with visible progress so the UI never *looks*
+        hung. Only the *text* streams; the ``Citation``s do not change token-by-token,
+        so callers derive them once from ``context`` (see :meth:`citations_for_context`).
+
+        The non-streaming :meth:`generate` is kept intact as the tested fallback and
+        for callers that want a whole ``Answer`` object in one call.
+        """
+        # HARD ABSTENTION GUARD (AC3 / G4): the exact same invariant as generate() —
+        # an empty context yields the deterministic abstention sentence *whole* and
+        # never calls the LLM. Yield-then-return so the caller's stream sink shows the
+        # identical text the non-streaming path would return.
+        if not context:
+            yield _ABSTENTION_TEXT
+            return
+
+        prompt = self._build_prompt(query, context)
+        # Fail-fast is preserved: _invoke_llm_stream opens the connection before its
+        # first yield, so an unreachable Ollama raises OllamaUnreachableError on the
+        # first iteration — before any generated text reaches the caller.
+        yield from self._invoke_llm_stream(prompt)
+
+    def citations_for_context(self, context: RetrievedContext) -> list[Citation]:
+        """Public seam to derive the Citations behind a context (FR9 / AC2).
+
+        Streaming splits an Answer in two: the *text* streams from the LLM while the
+        *Citations* are fixed the instant retrieval returns. The streaming caller
+        renders the text with :meth:`generate_stream` and attaches sources via this
+        method, so the SourcesPanel shows exactly the provenance the non-streaming
+        path derives — same logic, one source of truth.
+        """
+        return self._citations_from_context(context)
 
     # --- grounded prompt assembly (FR7) --------------------------------------
 
@@ -260,6 +300,70 @@ class Generator:
                 "message content. Verify the server version and model."
             )
         return content
+
+    def _invoke_llm_stream(self, user_prompt: str) -> Iterator[str]:
+        """POST to /api/chat with ``stream=True`` and yield each content fragment.
+
+        Ollama streams NDJSON: one JSON object per line, each carrying an incremental
+        ``message.content``, until a final line with ``done: true``. We consume it with
+        ``requests``' ``stream=True`` + ``iter_lines()``, parse each line, and yield the
+        text pieces as they arrive. Same endpoint and same fail-fast error mapping as
+        the non-streamed path — only ``stream`` and the response handling differ.
+        """
+        requests = self._http()
+        url = f"{self.ollama_base_url}/api/chat"
+        body = {
+            "model": self.llm_model,
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            # Streamed: ask Ollama to emit incremental NDJSON fragments so the UI can
+            # render tokens as they are produced instead of waiting for the whole reply.
+            "stream": True,
+            "options": {"temperature": self.temperature},
+        }
+        try:
+            response = requests.post(
+                url, json=body, timeout=_CHAT_TIMEOUT_SECONDS, stream=True
+            )
+        except (requests.exceptions.RequestException, OSError) as exc:
+            # Raised before any fragment is yielded — fail-fast, loud, actionable.
+            raise OllamaUnreachableError(
+                f"Cannot reach Ollama at '{self.ollama_base_url}' while generating. "
+                "Start it with `ollama serve` and verify the base URL."
+            ) from exc
+
+        if response.status_code != 200:
+            detail = self._error_detail(response)
+            lowered = detail.lower()
+            # Same actionable model error as the non-streamed path.
+            if "not found" in lowered or "pull" in lowered:
+                raise ModelNotPulledError(
+                    f"LLM model '{self.llm_model}' is not available in Ollama "
+                    f"(/api/chat → HTTP {response.status_code}: {detail}). "
+                    f"Pull it first: `ollama pull {self.llm_model}`."
+                )
+            raise RagEngineError(
+                f"Ollama /api/chat at '{self.ollama_base_url}' returned HTTP "
+                f"{response.status_code}: {detail}."
+            )
+
+        for line in response.iter_lines():
+            if not line:
+                continue  # Ollama may emit keep-alive blank lines; skip them.
+            try:
+                payload = json.loads(line)
+            except ValueError:
+                # A malformed line shouldn't abort a reply that's otherwise arriving;
+                # skip it rather than crash mid-stream.
+                continue
+            message = payload.get("message") if isinstance(payload, dict) else None
+            fragment = message.get("content") if isinstance(message, dict) else None
+            if fragment:
+                yield fragment
+            if isinstance(payload, dict) and payload.get("done"):
+                break
 
     @staticmethod
     def _error_detail(response) -> str:

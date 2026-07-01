@@ -9,6 +9,8 @@ dedupe, the Answer invariant holds, and the failure modes stay distinct.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from core.generate import Generator, _ABSTENTION_TEXT
@@ -65,6 +67,43 @@ def _install_chat(monkeypatch, reply: str = "Respuesta basada en el contexto.") 
 
     monkeypatch.setattr("requests.post", fake_post)
     return bodies
+
+
+class _FakeStreamResponse:
+    """A /api/chat response consumed as a stream: iter_lines yields NDJSON bytes."""
+
+    def __init__(
+        self,
+        lines: list[bytes],
+        status_code: int = 200,
+        payload: dict | None = None,
+        *,
+        text: str = "",
+    ) -> None:
+        self.status_code = status_code
+        self._lines = lines
+        self._payload = payload
+        self.text = text
+
+    def json(self) -> dict:
+        if self._payload is None:
+            raise ValueError("no json body")
+        return self._payload
+
+    def iter_lines(self):
+        # Ollama yields bytes, one JSON object per line; mirror that here.
+        yield from self._lines
+
+
+def _stream_lines(fragments: list[str]) -> list[bytes]:
+    """NDJSON lines for a streamed reply: one fragment per line, then a done marker."""
+    lines = [
+        json.dumps({"message": {"role": "assistant", "content": frag}, "done": False}).encode()
+        for frag in fragments
+    ]
+    # Final line: Ollama sends an empty content with done=True to close the stream.
+    lines.append(json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}).encode())
+    return lines
 
 
 def _chunk(doc_id: str, page: int, text: str = "texto", **md_extra) -> Chunk:
@@ -251,3 +290,56 @@ def test_check_health_raises_when_ollama_unreachable(monkeypatch):
 
     with pytest.raises(OllamaUnreachableError):
         _make_generator().check_health()
+
+
+# --- FR7 streaming: generate_stream yields fragments in order ----------------
+
+
+def test_generate_stream_yields_fragments_in_order(monkeypatch):
+    fragments = ["El plazo ", "es de ", "un mes."]
+    bodies: list[dict] = []
+
+    def fake_post(url, json=None, timeout=None, stream=None):
+        assert url.endswith("/api/chat")
+        assert stream is True  # streamed request, unlike the non-streamed generate()
+        bodies.append(json)
+        return _FakeStreamResponse(_stream_lines(fragments))
+
+    monkeypatch.setattr("requests.post", fake_post)
+    generator = _make_generator()
+
+    got = list(generator.generate_stream(Query(text="¿plazo?"), context=[_chunk("doc", 1)]))
+
+    # Fragments arrive in order and concatenate to the full reply (the empty done
+    # marker is dropped, not yielded).
+    assert got == fragments
+    assert "".join(got) == "El plazo es de un mes."
+    assert len(bodies) == 1
+    assert bodies[0]["stream"] is True
+
+
+def test_generate_stream_empty_context_abstains_without_calling_llm(monkeypatch):
+    # AC3 / G4 must hold on the streaming path too: no context ⇒ no LLM call.
+    def boom(url, json=None, timeout=None, stream=None):
+        raise AssertionError("LLM must not be called on empty context")
+
+    monkeypatch.setattr("requests.post", boom)
+    generator = _make_generator()
+
+    got = list(generator.generate_stream(Query(text="¿algo?"), context=[]))
+
+    assert got == [_ABSTENTION_TEXT]  # the abstention sentence, yielded whole
+    assert "".join(got) == _ABSTENTION_TEXT
+
+
+def test_generate_stream_raises_unreachable_before_yielding(monkeypatch):
+    # Fail-fast: an unreachable Ollama surfaces on the first iteration, before any
+    # generated text reaches the caller.
+    def boom(url, json=None, timeout=None, stream=None):
+        raise ConnectionError("connection refused")
+
+    monkeypatch.setattr("requests.post", boom)
+    stream = _make_generator().generate_stream(Query(text="x"), context=[_chunk("doc", 1)])
+
+    with pytest.raises(OllamaUnreachableError):
+        list(stream)
