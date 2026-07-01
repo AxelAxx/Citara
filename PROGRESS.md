@@ -4,7 +4,7 @@
 > y siguientes pasos. Se actualiza al cerrar cada hito. Alimenta luego `DECISIONS.md`
 > y el `README.md`.
 
-Última actualización: 2026-06-30
+Última actualización: 2026-07-01
 
 ---
 
@@ -21,9 +21,9 @@
 | Aplicación | `core/engine.py` | ✅ Hecho | 7 |
 | Presentación | `app.py` | ✅ Hecho (validado en vivo end-to-end) | n/a (UI) |
 | Config | `config/health.yaml` | ✅ Hecho (validado en vivo sobre corpus real) | — |
-| Config | `config/legal.yaml` | ⬜ Pendiente | — |
+| Config | `config/legal.yaml` | ✅ Hecho (corpus BOE; carga OK) | — |
 
-**Tests totales: 63 verdes.** Suite sin dependencias vivas (mocks de Ollama/Chroma).
+**Tests totales: 69 verdes.** Suite sin dependencias vivas (mocks de Ollama/Chroma).
 
 **Repo:** GitHub `AxelAxx/Citara` — privado hasta fijar licencia.
 
@@ -35,7 +35,36 @@
 confirmada en vivo (AC1 ✅); Qwen responde en español citando guías reales
 (AC2 ✅) y se abstiene ante preguntas fuera de corpus (AC3 ✅), todo por HTTP
 directo contra Ollama (`/api/embed` + `/api/chat`, sin LangChain en la inferencia).
-Siguiente: segunda vertical `legal` (BOE) para demostrar G1 y cerrar AC4.
+Vertical `legal` (BOE) ya integrada (G1 demostrable). Foco actual: pulido de UX
+(streaming, warm-up, `top_k`) y preparación de la publicación.
+
+---
+
+## Mejoras de sesión — UX y calidad de recuperación (2026-07-01)
+
+- **`top_k` afinado a 6** en ambos `config/*.yaml` (antes 8; el default del código
+  sigue en 5, el override vive en config por golden rule 2). Equilibrio
+  recall/precisión: con 8 se colaban chunks de documentos vecinos poco relevantes
+  que degradaban respuestas centrales. **Verificado en vivo:** "tratamiento de
+  primera línea para hipertensión" salía limpia con `top_k=6` pero confusa con 8
+  (chunks de ictus colándose). Solo query-time, sin re-ingesta.
+- **Streaming de respuestas (token a token).** Nuevo
+  `RagEngine.answer_stream(query) -> StreamedAnswer` (orquestación en la capa de
+  Aplicación: `retrieve` + `Generator.generate_stream`, con las citas derivadas del
+  context por separado). La UI consume `st.write_stream` **por interfaz pública**,
+  sin tocar internos del engine; `generate()` no-streaming queda intacto como
+  fallback. Elimina la sensación de cuelgue en la lenta RTX 1080: el usuario ve la
+  respuesta generarse en vez de mirar un spinner 1–2 min. Guardia de abstención
+  preservada (context vacío cede la frase de abstención sin llamar al LLM).
+- **Warm-up del LLM al arrancar.** `RagEngine.warm_up()` (público, delega en
+  `Generator.warm_up()`) hace un `POST /api/chat` mínimo (`num_predict: 1` +
+  `keep_alive: "10m"`) que fuerza la carga de Qwen (4.7 GB) en VRAM **sin generar
+  respuesta real**. Se dispara dentro del `@st.cache_resource` → una sola vez por
+  vertical, mientras el usuario lee la UI. Best-effort: si Ollama está caído no
+  bloquea el arranque (el error accionable sigue surgiendo por `check_health`). La
+  primera pregunta ya no paga el arranque en frío. Red de seguridad: spinner honesto
+  "Generando la respuesta…" y, en la primera pregunta de la sesión, "Preparando el
+  modelo…".
 
 ---
 
@@ -90,7 +119,7 @@ Siguiente: segunda vertical `legal` (BOE) para demostrar G1 y cerrar AC4.
 
 - ✅ ~~**`generate.py` usa `ChatOllama`**~~ **RESUELTO (B-05).** `Generator` reimplementado contra `/api/chat` por HTTP directo; LangChain fuera del camino de inferencia.
 - ✅ ~~**Posible código muerto en `embed.py`**~~ **RESUELTO.** El adapter quedó limpio tras los fixes B-03 (HTTP directo + batching); sin restos del cliente langchain.
-- **Rendimiento en RTX 1080 (Pascal):** la GPU es lenta frente a generaciones modernas; usable para chat, pero la respuesta de Qwen tarda. **Mejora futura:** streaming de respuestas (`"stream": true` en `/api/chat` + `st.write_stream` en la UI) para que el usuario vea tokens según se generan en vez de esperar la respuesta completa. No bloquea el MVP.
+- ✅ ~~**Streaming de respuestas (mejora futura)**~~ **HECHO (2026-07-01).** `answer_stream` + `st.write_stream` token a token, y warm-up del LLM al arrancar (ver *Mejoras de sesión*). La lentitud de la RTX 1080 (Pascal) sigue siendo real, pero ya no se percibe como cuelgue y la primera pregunta no paga el arranque en frío.
 - **Versiones flotantes** en `requirements.txt`: fijar con `==` antes de publicar.
 
 ---
@@ -102,9 +131,15 @@ Siguiente: segunda vertical `legal` (BOE) para demostrar G1 y cerrar AC4.
 3. ✅ **AC1 validado**: segunda ingesta idempotente (mismo nº de chunks, sin duplicar).
 4. ✅ **`streamlit run app.py`** → respuesta en vivo. AC2 (respuesta + citas) y AC3 (abstención) validados.
 5. ⏳ **Iterar el `system_prompt`** de health con preguntas reales (aquí está el valor del proyecto).
-6. ⏳ **`config/legal.yaml`** + corpus legal → demostrar G1 (mismo motor, 2 verticales, cero diff en `core/`) y cerrar AC4. **(en curso)**
+6. ✅ **`config/legal.yaml`** + corpus legal (BOE) integrado → G1 demostrable (mismo motor, 2 verticales, cero diff en `core/`). Falta validar el switch en vivo para cerrar AC4.
 7. **Auto-ingesta en la UI** (D-05): botón / auto-detección con loading.
-8. **Pulido final:** UI sobre Streamlit, mascota (icono), README + GIF de demo, `DECISIONS.md`, licencia AGPL, fijar versiones, repo público.
+8. **Pulido final (UX + publicación):**
+   - **Splash screen** de arranque: esconder el warm-up del LLM tras la marca/logo, para que el precalentado ocurra bajo una pantalla de bienvenida en vez de percibirse como espera.
+   - **Diseño de UI** (hecho con Claude Design; **pendiente de implementar** en Streamlit) + mascota/icono.
+   - **README** reproducible + **GIF** de demo + diagrama.
+   - **`DECISIONS.md`**: volcar D-01…D-06 con el rationale completo.
+   - **Licencia AGPL-3.0** (D-06) y **fijar versiones** con `==` en `requirements.txt`.
+   - **Repo público** (GitHub `AxelAxx/Citara`), tras aplicar licencia y fijar versiones.
 
 ---
 
@@ -113,8 +148,8 @@ Siguiente: segunda vertical `legal` (BOE) para demostrar G1 y cerrar AC4.
 - [x] AC1 — ingesta persiste + idempotente — **validado en vivo sobre corpus health real**
 - [x] AC2 — respuesta con ≥1 cita correcta (doc + página) — **validado en vivo (Qwen cita guías reales en español)**
 - [x] AC3 — abstención ante pregunta fuera de corpus — **validado en vivo**
-- [ ] AC4 — cambio de vertical sin diff en `core/` (requiere legal.yaml)
-- [ ] AC5 — modo avión: sin llamadas externas
-- [x] AC6 — pytest verde (Chunker, Citation, Retriever con mocks) — **60 tests**
+- [ ] AC4 — cambio de vertical sin diff en `core/` — legal.yaml integrado; **pendiente validar el switch en vivo**
+- [x] AC5 — modo avión: sin llamadas externas — **validado en vivo (2026-07-01)**
+- [x] AC6 — pytest verde (Chunker, Citation, Retriever con mocks) — **69 tests**
 - [x] AC7 — errores accionables (Ollama down / modelo sin pull / corpus vacío) — verificado en vivo
 - [ ] AC8 — README reproducible + GIF + diagrama
