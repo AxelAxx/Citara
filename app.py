@@ -15,6 +15,8 @@ on the first query (NFR6/AC7).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import streamlit as st
 
 from core.engine import RagEngine
@@ -34,7 +36,10 @@ from core.models import (
     VerticalConfig,
 )
 
-_SPINNER_TEXT = "Consultando los documentos…"
+_SPINNER_TEXT = "Generando la respuesta…"
+# Safety net for a still-cold model (warm-up failed or hasn't finished): an honest,
+# one-off message so the first, slower answer doesn't read as a hang.
+_FIRST_SPINNER_TEXT = "Preparando el modelo; la primera respuesta puede tardar unos segundos…"
 _ABSTENTION_NOTE = (
     "Sin fuentes: la respuesta no se encontró en los documentos (abstención). "
     "Esto es el comportamiento esperado, no un error."
@@ -70,7 +75,21 @@ def _load_engine(vertical_value: str) -> RagEngine:
     interaction) would be wasteful and slow. Keyed by the Vertical value, so
     switching Vertical loads that Vertical's engine and keeps each cached.
     """
-    return RagEngine.from_vertical_config(_load_vertical_config(Vertical(vertical_value)))
+    engine = RagEngine.from_vertical_config(_load_vertical_config(Vertical(vertical_value)))
+    # Warm up the LLM here, inside the memoized builder, so it preloads Qwen into
+    # VRAM once per Vertical (on first construction) — never on every rerun — while
+    # the user is still reading the UI. This turns the ~4.7GB cold-start into
+    # startup latency instead of first-query latency.
+    #
+    # Best-effort: a warm-up failure (e.g. Ollama down) must NOT block startup. We
+    # swallow it because warm-up is a pure optimization and the *same* actionable
+    # error is surfaced loudly a moment later by _check_dependencies() — so this is
+    # not a silent "hide the cause", it is "don't fail twice" (golden rule 5).
+    try:
+        engine.warm_up()
+    except RagEngineError:
+        pass
+    return engine
 
 
 # --- error translation (NFR6/AC7) --------------------------------------------
@@ -141,6 +160,30 @@ def _render_history(history: list[dict]) -> None:
                 _render_sources_panel(message["answer"])
 
 
+def _spinner_until_first_token(text_stream: Iterator[str]) -> Iterator[str]:
+    """Pull the first fragment eagerly, then re-emit it followed by the rest.
+
+    The cold-model load and the wait for the first token happen on the *first*
+    ``next()`` of the stream. Draining that one fragment inside the caller's
+    ``st.spinner`` keeps the spinner up across that wait (retrieval + first token),
+    then ``st.write_stream`` takes over and renders the tokens as they arrive. Any
+    generation error (Ollama down, model missing) surfaces here, still inside the
+    caller's try/except.
+    """
+    iterator = iter(text_stream)
+    try:
+        first = next(iterator)
+    except StopIteration:
+        first = None
+
+    def _rejoined() -> Iterator[str]:
+        if first is not None:
+            yield first
+        yield from iterator
+
+    return _rejoined()
+
+
 # --- main --------------------------------------------------------------------
 
 
@@ -200,17 +243,24 @@ def main() -> None:
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # First question of the session? If warm-up didn't fully hide the cold start,
+    # show an honest heads-up. Simple per-session flag — no elaborate detection.
+    first_query = not st.session_state.get("has_generated", False)
+    spinner_text = _FIRST_SPINNER_TEXT if first_query else _SPINNER_TEXT
+
     with st.chat_message("assistant"):
         try:
             # Consume the engine's PUBLIC streaming seam — the UI knows nothing about
             # the Retriever/Generator inside. answer_stream() runs retrieval eagerly
-            # (covered by the short spinner) and returns the still-lazy text generator
-            # plus the citations derived from the retrieved context.
-            with st.spinner(_SPINNER_TEXT):
+            # and returns the still-lazy text generator plus the citations derived from
+            # the retrieved context. The spinner covers retrieval AND the wait for the
+            # first token (where a cold model would load), then write_stream renders
+            # the tokens as they arrive.
+            with st.spinner(spinner_text):
                 streamed = engine.answer_stream(prompt)
-            # st.write_stream renders each fragment as it arrives and returns the full
-            # concatenated text — the visible fix for the "looks hung" spinner.
-            full_text = st.write_stream(streamed.text_stream)
+                primed = _spinner_until_first_token(streamed.text_stream)
+            full_text = st.write_stream(primed)
+            st.session_state["has_generated"] = True
         except RagEngineError as exc:
             # Retrieval/generation failures (empty Collection, Ollama dropped, model
             # not pulled) all carry actionable messages — Ollama-down raises on the

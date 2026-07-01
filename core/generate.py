@@ -211,6 +211,57 @@ class Generator:
                 f"Pull it first: `ollama pull {self.llm_model}`."
             )
 
+    def warm_up(self) -> None:
+        """Force Ollama to load the LLM into VRAM before the first real Query.
+
+        Why: the first generation of a session otherwise pays the model-load cost
+        (``qwen2.5:7b`` ≈ 4.7 GB into VRAM), which reads as a hang. We send the
+        smallest possible ``/api/chat`` request — a trivial message capped at a
+        single predicted token (``num_predict = 1``) — purely to trigger the load;
+        the reply is discarded, so no real answer is generated. ``keep_alive`` asks
+        Ollama to hold the model resident afterwards, so the first user question
+        finds it hot.
+
+        This is an *optimization*, not the query path: fail-fast is still honoured
+        here (a down server or missing model raises the usual actionable error), but
+        the caller is expected to treat that failure as non-fatal — the same error
+        surfaces loudly through :meth:`check_health` at startup, so swallowing it at
+        the call site skips only the warm-up, it never hides the cause (golden rule 5).
+        """
+        requests = self._http()
+        url = f"{self.ollama_base_url}/api/chat"
+        body = {
+            "model": self.llm_model,
+            "messages": [{"role": "user", "content": "."}],
+            "stream": False,
+            # num_predict=1: emit at most one token — we want the model resident in
+            # VRAM, not an actual answer.
+            "options": {"num_predict": 1},
+            # Hold the model loaded so the first real Query lands on a warm model.
+            "keep_alive": "10m",
+        }
+        try:
+            response = requests.post(url, json=body, timeout=_CHAT_TIMEOUT_SECONDS)
+        except (requests.exceptions.RequestException, OSError) as exc:
+            raise OllamaUnreachableError(
+                f"Cannot reach Ollama at '{self.ollama_base_url}' while warming up. "
+                "Start it with `ollama serve` and verify the base URL."
+            ) from exc
+
+        if response.status_code != 200:
+            detail = self._error_detail(response)
+            lowered = detail.lower()
+            if "not found" in lowered or "pull" in lowered:
+                raise ModelNotPulledError(
+                    f"LLM model '{self.llm_model}' is not available in Ollama "
+                    f"(warm-up /api/chat → HTTP {response.status_code}: {detail}). "
+                    f"Pull it first: `ollama pull {self.llm_model}`."
+                )
+            raise RagEngineError(
+                f"Ollama /api/chat at '{self.ollama_base_url}' returned HTTP "
+                f"{response.status_code}: {detail} during warm-up."
+            )
+
     def _list_pulled_models(self) -> set[str]:
         requests = self._http()
         url = f"{self.ollama_base_url}/api/tags"

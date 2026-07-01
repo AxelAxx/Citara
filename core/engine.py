@@ -162,6 +162,17 @@ class RagEngine:
         citations = self._generator.citations_for_context(context)
         return StreamedAnswer(text_stream=text_stream, citations=citations)
 
+    def warm_up(self) -> None:
+        """Preload the LLM into VRAM before the first Query (latency optimization).
+
+        Delegates to the Generator's warm-up so Presentation can trigger it through
+        the engine's public interface, never reaching into the Generator itself.
+        Best-effort by nature (see :meth:`Generator.warm_up`): the caller may treat a
+        failure as non-fatal, because the actionable reachability/model error still
+        surfaces loudly through :meth:`check_health`.
+        """
+        self._generator.warm_up()
+
     # --- aggregated preflight (NFR6/AC7) -------------------------------------
 
     def check_health(self) -> None:
