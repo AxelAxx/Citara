@@ -19,12 +19,31 @@ presentation.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from dataclasses import dataclass
+
 from core.embed import OllamaEmbedder
 from core.generate import Generator
 from core.ingest import _load_vertical_config  # see TODO(module 9) below
-from core.models import Answer, Query, Vertical, VerticalConfig
+from core.models import Answer, Citation, Query, Vertical, VerticalConfig
 from core.retrieve import Retriever
 from core.store import VectorStore
+
+
+@dataclass(frozen=True)
+class StreamedAnswer:
+    """The streaming counterpart of an :class:`Answer`: text arrives incrementally,
+    Citations are known up front.
+
+    ``text_stream`` yields the reply fragments as the LLM emits them (or the whole
+    abstention sentence in one piece when there was nothing to ground on).
+    ``citations`` are derived from the retrieved context the moment retrieval returns
+    — they do not change token-by-token — so the SourcesPanel renders from the same
+    provenance the non-streaming :meth:`RagEngine.answer` would carry.
+    """
+
+    text_stream: Iterator[str]
+    citations: list[Citation]
 
 
 class RagEngine:
@@ -114,6 +133,34 @@ class RagEngine:
 
         context = self._retriever.retrieve(query, top_k=self._top_k, where=where)
         return self._generator.generate(query, context)
+
+    def answer_stream(
+        self, query: Query | str, *, where: dict | None = None
+    ) -> StreamedAnswer:
+        """Streaming twin of :meth:`answer` — same orchestration, incremental text.
+
+        Streaming is *orchestration*, not presentation: it is still retrieve-then-
+        generate, only split into two observable steps (retrieve the context, then
+        stream the generated text). That split belongs here in the Application layer,
+        exactly like :meth:`answer`, so the UI consumes one public seam and never
+        reaches into the Retriever/Generator itself — Presentation stays decoupled
+        from Application (golden rule 1).
+
+        Returns the text generator together with the Citations derived from the
+        retrieved context. The empty-context (abstention) case is handled coherently
+        with :meth:`answer`: the Generator's stream yields the abstention text whole
+        and ``citations`` is empty, so no LLM call happens and no special-casing is
+        needed here. ``generate_stream`` is lazy, so an unreachable Ollama still fails
+        fast on the caller's first iteration, before any text is shown.
+        """
+        if isinstance(query, str):
+            query = Query(text=query)
+
+        context = self._retriever.retrieve(query, top_k=self._top_k, where=where)
+        # Citations are fixed the instant retrieval returns; only the text streams.
+        text_stream = self._generator.generate_stream(query, context)
+        citations = self._generator.citations_for_context(context)
+        return StreamedAnswer(text_stream=text_stream, citations=citations)
 
     # --- aggregated preflight (NFR6/AC7) -------------------------------------
 

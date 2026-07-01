@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from core.engine import RagEngine
-from core.models import Answer, Chunk, ChunkMetadata, Query, Vertical, VerticalConfig
+from core.engine import RagEngine, StreamedAnswer
+from core.generate import _ABSTENTION_TEXT
+from core.models import Answer, Chunk, ChunkMetadata, Citation, Query, Vertical, VerticalConfig
 
 
 class _FakeRetriever:
@@ -28,14 +29,30 @@ class _FakeRetriever:
 
 
 class _FakeGenerator:
-    def __init__(self, answer: Answer) -> None:
+    def __init__(self, answer: Answer, *, fragments=None, citations=None) -> None:
         self.calls: list[dict] = []
+        self.stream_calls: list[dict] = []
         self._answer = answer
+        self._fragments = list(fragments) if fragments is not None else []
+        self._citations = list(citations) if citations is not None else []
         self.health_checked = False
 
     def generate(self, query, context) -> Answer:
         self.calls.append({"query": query, "context": context})
         return self._answer
+
+    def generate_stream(self, query, context):
+        # Mirror the real Generator contract: empty context abstains (yields the
+        # abstention sentence whole, no LLM call); otherwise yield the fragments.
+        self.stream_calls.append({"query": query, "context": context})
+        if not context:
+            yield _ABSTENTION_TEXT
+            return
+        yield from self._fragments
+
+    def citations_for_context(self, context):
+        # Citations derive from context: none when there is nothing to ground on.
+        return list(self._citations) if context else []
 
     def check_health(self) -> None:
         self.health_checked = True
@@ -177,3 +194,67 @@ def test_from_vertical_config_propagates_top_k():
     retriever = _FakeRetriever([Chunk(text="t", metadata=ChunkMetadata(document_id="d", page=1))])
     # Rebuild a tiny engine sharing the same top_k to confirm it was captured.
     assert engine._top_k == 3
+
+
+# --- FR7/FR11: answer_stream orchestrates streaming (text + citations) --------
+
+
+def test_answer_stream_returns_text_stream_and_citations():
+    context = [Chunk(text="t", metadata=ChunkMetadata(document_id="doc", page=1))]
+    retriever = _FakeRetriever(context)
+    citations = [Citation(document_id="doc", page=1)]
+    generator = _FakeGenerator(
+        _answer_with_citation(),
+        fragments=["El plazo ", "es de ", "un mes."],
+        citations=citations,
+    )
+    engine = RagEngine(retriever=retriever, generator=generator, top_k=6)
+
+    streamed = engine.answer_stream(Query(text="¿plazo?"))
+
+    assert isinstance(streamed, StreamedAnswer)
+    # top_k from config flows into retrieval, exactly like answer().
+    assert retriever.calls[0]["top_k"] == 6
+    # The text generator yields the generator's fragments, in order.
+    assert list(streamed.text_stream) == ["El plazo ", "es de ", "un mes."]
+    # Citations pass through from citations_for_context(context).
+    assert streamed.citations == citations
+    # The retrieved context is exactly what the generator streamed from.
+    assert generator.stream_calls[0]["context"] is context
+
+
+def test_answer_stream_wraps_str_query():
+    context = [Chunk(text="t", metadata=ChunkMetadata(document_id="d", page=1))]
+    retriever = _FakeRetriever(context)
+    generator = _FakeGenerator(
+        _answer_with_citation(),
+        fragments=["hola"],
+        citations=[Citation(document_id="d", page=1)],
+    )
+    engine = RagEngine(retriever=retriever, generator=generator, top_k=5)
+
+    streamed = engine.answer_stream("texto plano")
+    list(streamed.text_stream)  # generate_stream is lazy; consume it to record the call
+
+    assert isinstance(retriever.calls[0]["query"], Query)
+    assert retriever.calls[0]["query"].text == "texto plano"
+    # the same wrapped Query reaches the generator's stream.
+    assert isinstance(generator.stream_calls[0]["query"], Query)
+    assert generator.stream_calls[0]["query"].text == "texto plano"
+
+
+def test_answer_stream_empty_context_abstains_with_no_citations():
+    retriever = _FakeRetriever([])  # nothing retrieved
+    generator = _FakeGenerator(
+        _answer_with_citation(),
+        fragments=["no debería usarse"],
+        citations=[Citation(document_id="x", page=1)],
+    )
+    engine = RagEngine(retriever=retriever, generator=generator, top_k=5)
+
+    streamed = engine.answer_stream("¿algo?")
+
+    # Coherent with answer(): empty context ⇒ abstention text streamed, no citations,
+    # and no LLM fragments used.
+    assert list(streamed.text_stream) == [_ABSTENTION_TEXT]
+    assert streamed.citations == []

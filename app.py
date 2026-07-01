@@ -22,6 +22,7 @@ from core.engine import RagEngine
 # Reading the VerticalConfig for UI branding (display_name) is a presentation
 # concern, not domain logic. We reuse ingest.py's minimal loader so config is read
 # in one place; TODO(module 9): a dedicated config module will own this.
+from core.generate import _ABSTENTION_TEXT
 from core.ingest import _load_vertical_config
 from core.models import (
     Answer,
@@ -193,21 +194,39 @@ def main() -> None:
         st.warning("Resuelve el problema indicado arriba antes de preguntar.")
         return
 
+    # Show the user's question immediately, before any generation, so the slow LLM
+    # (1–2 min on local hardware) never makes the app look hung waiting on a spinner.
     history.append({"role": "user", "text": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner(_SPINNER_TEXT):
-            try:
-                answer = engine.answer(prompt)
-            except RagEngineError as exc:
-                # Retrieval/generation failures (empty Collection, Ollama dropped,
-                # …) all carry actionable messages — show them, keep the app alive.
-                st.error(str(exc))
-                history.append({"role": "assistant", "text": str(exc), "answer": None})
-                return
-        st.markdown(answer.text)
+        try:
+            # Consume the engine's PUBLIC streaming seam — the UI knows nothing about
+            # the Retriever/Generator inside. answer_stream() runs retrieval eagerly
+            # (covered by the short spinner) and returns the still-lazy text generator
+            # plus the citations derived from the retrieved context.
+            with st.spinner(_SPINNER_TEXT):
+                streamed = engine.answer_stream(prompt)
+            # st.write_stream renders each fragment as it arrives and returns the full
+            # concatenated text — the visible fix for the "looks hung" spinner.
+            full_text = st.write_stream(streamed.text_stream)
+        except RagEngineError as exc:
+            # Retrieval/generation failures (empty Collection, Ollama dropped, model
+            # not pulled) all carry actionable messages — Ollama-down raises on the
+            # first streamed fragment, before any text is shown. Surface them, keep
+            # the app alive.
+            st.error(str(exc))
+            history.append({"role": "assistant", "text": str(exc), "answer": None})
+            return
+
+        # Rebuild the Answer for the SourcesPanel + history. No citations ⇔ empty
+        # context ⇔ the stream carried the abstention text; otherwise the streamed
+        # text is grounded on the citations the engine derived.
+        if not streamed.citations:
+            answer = Answer.abstention(full_text or _ABSTENTION_TEXT)
+        else:
+            answer = Answer(text=full_text, citations=streamed.citations)
         _render_sources_panel(answer)
 
     history.append({"role": "assistant", "text": answer.text, "answer": answer})
