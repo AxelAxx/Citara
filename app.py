@@ -432,6 +432,43 @@ html, body, .stApp,
 .st-key-citara-welcome .st-key-citara-comenzar button > div{ justify-content:center; }
 .st-key-citara-welcome .st-key-citara-comenzar button p{ font-size:15px; font-weight:600; }
 .st-key-citara-welcome .welcome-foot{ font-size:12px; color:var(--faint); text-align:center; }
+
+/* ---- Loading answer card (tokens from export/screens/04-loading-answer.html) --
+   Shown while retrieval + the first-token wait run; cleared on the first streamed
+   fragment (see handle_query). Scoped under the placeholder's st-key so nothing
+   leaks into the rest of the chat. Keyframes are citara-prefixed on purpose:
+   @keyframes names are page-global, and generic ones (pulse/shimmer) could
+   collide with Streamlit's own animations. */
+.st-key-citara-loading .loading-label{ font-size:10.5px; margin-bottom:14px; }
+.st-key-citara-loading .loading-row{ display:flex; gap:13px; }
+/* C¹ avatar tile — same 32px em math as the chat avatar (C = .56em ⇒ 18px), plus
+   the mock's pulse while generating */
+.st-key-citara-loading .loading-avatar{ position:relative; width:32px; height:32px; flex-shrink:0;
+  border-radius:26%; background:var(--accent-tint); border:1px solid var(--accent-line);
+  display:flex; align-items:center; justify-content:center;
+  animation:citaraPulse 1.4s ease-in-out infinite; }
+.st-key-citara-loading .loading-avatar::before{
+  content:'C'; font-family:var(--font-serif); font-weight:600; line-height:1;
+  letter-spacing:-.02em; font-size:18px; color:var(--text); }
+.st-key-citara-loading .loading-avatar::after{
+  content:'1'; position:absolute; top:6px; left:21px; line-height:1;
+  font-family:var(--font-mono); font-weight:600; font-size:6px; color:var(--accent); }
+.st-key-citara-loading .loading-body{ flex:1; min-width:0; }
+.st-key-citara-loading .shimmer-line{ height:11px; border-radius:6px; margin-bottom:9px;
+  background:linear-gradient(90deg,var(--surface) 0%,var(--surface2) 50%,var(--surface) 100%);
+  background-size:200% 100%; animation:citaraShimmer 1.6s linear infinite; }
+.st-key-citara-loading .loading-phases{ display:flex; align-items:center; gap:14px; margin-top:15px;
+  font-family:var(--font-mono); font-size:11px; }
+.st-key-citara-loading .phase-done{ color:var(--accent); }
+.st-key-citara-loading .phase-next{ color:var(--faint); }
+.st-key-citara-loading .dots{ display:inline-flex; gap:3px; }
+.st-key-citara-loading .dots span{ display:inline-block; width:5px; height:5px; border-radius:50%;
+  background:var(--accent); animation:citaraDots 1.2s infinite; }
+.st-key-citara-loading .dots span:nth-child(2){ animation-delay:.18s; }
+.st-key-citara-loading .dots span:nth-child(3){ animation-delay:.36s; }
+@keyframes citaraShimmer{ 0%{ background-position:200% 0; } 100%{ background-position:-200% 0; } }
+@keyframes citaraPulse{ 0%,100%{ opacity:.55; } 50%{ opacity:1; } }
+@keyframes citaraDots{ 0%,80%,100%{ opacity:.25; transform:translateY(0); } 40%{ opacity:1; transform:translateY(-2px); } }
 </style>
 """
 
@@ -902,6 +939,32 @@ def _render_welcome(options: list[tuple[str, str]]) -> None:
         )
 
 
+def _render_loading_card(label_text: str) -> None:
+    """The mock's loading state-card: pulsing C¹ avatar, shimmer lines, phase row.
+
+    Static presentation mapped to REAL stream milestones, never to timers:
+    retrieval already ran (eager, in answer_stream) by the time this paints, so
+    "Recuperando fragmentos" is shown done; the card is cleared on the first
+    streamed token, which IS the "Redactando" transition. No fake progress.
+    """
+    st.markdown(
+        '<div class="state-card">'
+        f'<div class="label loading-label">{label_text}</div>'
+        '<div class="loading-row">'
+        '<span class="loading-avatar"></span>'
+        '<div class="loading-body">'
+        '<div class="shimmer-line" style="width:100%;"></div>'
+        '<div class="shimmer-line" style="width:92%;"></div>'
+        '<div class="shimmer-line" style="width:64%; margin-bottom:0;"></div>'
+        '<div class="loading-phases">'
+        '<span class="phase-done">✓ Recuperando fragmentos</span>'
+        '<span class="phase-next">· Redactando con citas</span>'
+        '<span class="dots"><span></span><span></span><span></span></span>'
+        "</div></div></div></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _spinner_until_first_token(text_stream: Iterator[str]) -> Iterator[str]:
     """Pull the first fragment eagerly, then re-emit it followed by the rest.
 
@@ -1043,13 +1106,27 @@ def main() -> None:
                 # Consume the engine's PUBLIC streaming seam — the UI knows nothing
                 # about the Retriever/Generator inside. answer_stream() runs
                 # retrieval eagerly and returns the still-lazy text generator plus
-                # the citations derived from the retrieved context. The spinner
-                # covers retrieval AND the wait for the first token (where a cold
-                # model would load), then write_stream renders the tokens as they
-                # arrive.
-                with st.spinner(spinner_text):
-                    streamed = engine.answer_stream(prompt)
+                # the citations derived from the retrieved context.
+                streamed = engine.answer_stream(prompt)
+                # The loading state-card replaces st.spinner, mapped to real
+                # milestones. Citations are already known here (retrieval eager):
+                # empty citations ⇒ the hard guard abstains WITHOUT calling the
+                # LLM and its only fragment arrives at once — a "generating" card
+                # there would be a lie, so skip it. (Soft abstention — citations
+                # present but the LLM declines in prose — does show the card:
+                # real retrieval and real generation happened.)
+                loading_slot = st.empty()
+                try:
+                    if streamed.citations:
+                        with loading_slot.container(key="citara-loading"):
+                            _render_loading_card(spinner_text)
+                    # The first next() inside blocks through the first-token wait
+                    # (cold model load included); the card lives exactly that long.
                     primed = _spinner_until_first_token(streamed.text_stream)
+                finally:
+                    # Success, RagEngineError or empty stream alike — never leave
+                    # the card orphaned above the answer or the error card.
+                    loading_slot.empty()
                 # Reserve a slot ABOVE the streamed text: a prose abstention is
                 # only recognizable once the full text has arrived, but the design
                 # places the abstention pill before the answer body.
