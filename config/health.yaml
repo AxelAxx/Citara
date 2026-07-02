@@ -9,6 +9,7 @@ collection_name: "health_gpc"
 domain_name: "Guías clínicas"
 domain_letter: "S"
 domain_sublabel: "GuíaSalud"
+domain_tagline: "GuíaSalud · Guías clínicas"
 
 # Retriever window: 6 — the recall/precision balance. Above the default 5 so
 # relevant chunks that fell just outside the top-5 aren't missed, but back down

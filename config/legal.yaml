@@ -9,6 +9,7 @@ collection_name: "legal_boe"
 domain_name: "Normativa legal"
 domain_letter: "L"
 domain_sublabel: "BOE"
+domain_tagline: "BOE · Legislación laboral"
 
 # Retriever window: 6 — the recall/precision balance. Above the default 5 so
 # relevant chunks that fell just outside the top-5 aren't missed, but back down

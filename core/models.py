@@ -189,6 +189,9 @@ class VerticalConfig(BaseModel):
     domain_name: str = ""
     domain_letter: str = ""
     domain_sublabel: str = ""
+    # Chat-header source line (e.g. "BOE · Legislación laboral"); empty ⇒ the
+    # header omits it. Same optional Spanish-UI-data pattern as the trio above.
+    domain_tagline: str = ""
 
 
 # --- Domain exceptions -------------------------------------------------------

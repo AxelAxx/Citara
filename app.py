@@ -540,6 +540,21 @@ html, body, .stApp,
    own chrome (collapse header + paddings) above/below the block. */
 .st-key-citara-sidebar{ min-height:calc(100vh - 10rem); }
 .st-key-citara-sidebar > div:last-child{ margin-top:auto; }
+
+/* ---- Chat header (tokens from export/screens/02-chat.html .main-head) ---------
+   The tag-pill takes the ACTIVE Vertical's accent — the --accent-* vars are
+   injected per vertical before this renders, so the pill recolors on switch. */
+.st-key-citara-head .head-tags{ display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+.st-key-citara-head .tag-pill{ display:inline-flex; align-items:center; gap:6px; padding:3px 9px;
+  border-radius:999px; background:var(--accent-tint); border:1px solid var(--accent-line);
+  font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--accent); }
+.st-key-citara-head .head-tagline{ font-family:var(--font-mono); font-size:11px; color:var(--faint); }
+.st-key-citara-head .head-h1{ margin:6px 0; font-family:var(--font-serif); font-weight:600;
+  font-size:30px; letter-spacing:-.015em; color:var(--text); }
+.st-key-citara-head .head-subtitle{ margin:0; font-size:14.5px; color:var(--muted);
+  max-width:640px; line-height:1.5; }
+.st-key-citara-head .head-subtitle strong{ color:var(--text); font-weight:600; }
 </style>
 """
 
@@ -1294,8 +1309,28 @@ def main() -> None:
     # switch): paint the honest "Conectando…" interim now — earliest point where
     # config (the badge's model line) exists — so the slot never sits empty.
     _render_ollama_badge(badge_slot, config, None, connecting=True)
-    st.title(config.display_name)  # branding from VerticalConfig
-    st.caption("Pregunta en español; las respuestas se basan solo en los documentos.")
+    # Chat header (the mock's .main-head): accent tag-pill with the short
+    # Vertical name (fail-safe fallback to display_name, like the welcome
+    # cards), the config-sourced tagline (omitted whole when empty), the long
+    # display_name as h1, and a static subtitle. Deliberately NOT shared with
+    # the welcome's subtitle: the two copys differ in the mock ("tus
+    # documentos" vs. "los documentos cargados").
+    tagline_html = (
+        f'<span class="head-tagline">{escape(config.domain_tagline)}</span>'
+        if config.domain_tagline
+        else ""
+    )
+    with st.container(key="citara-head"):
+        st.markdown(
+            '<div class="head-tags">'
+            f'<span class="tag-pill">{escape(config.domain_name or config.display_name)}</span>'
+            f"{tagline_html}</div>"
+            f'<h1 class="head-h1">{escape(config.display_name)}</h1>'
+            '<p class="head-subtitle">Pregunta en español; las respuestas se basan '
+            "<strong>solo</strong> en los documentos cargados, con la fuente exacta "
+            "de cada afirmación.</p>",
+            unsafe_allow_html=True,
+        )
 
     try:
         engine = _load_engine(vertical_value)

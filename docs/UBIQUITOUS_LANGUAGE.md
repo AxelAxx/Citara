@@ -60,6 +60,7 @@
 | **domain_name** | Optional short Vertical name shown on the welcome domain card and the "Comenzar" CTA (e.g. "Normativa legal"). Empty ⇒ the App falls back to `display_name`. Pure `VerticalConfig` presentation data. | `domain_name: str` |
 | **domain_letter** | Optional single-letter chip identifying a Vertical on its domain card (e.g. "L", "S"). Declared in config, never derived in code — deriving from the enum value would give health an "H", not "S". | `domain_letter: str` |
 | **domain_sublabel** | Optional source label under a domain card's name (e.g. "BOE", "GuíaSalud"). Never carries a document count — real counts are runtime corpus data, not static config. | `domain_sublabel: str` |
+| **domain_tagline** | Optional source line next to the chat header's tag-pill (e.g. "BOE · Legislación laboral"). Empty ⇒ the header omits it. Pure `VerticalConfig` presentation data. | `domain_tagline: str` |
 | **SourcesPanel** | The UI element listing the `Citation`s behind the current `Answer`. | — |
 
 ---
