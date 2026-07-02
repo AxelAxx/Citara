@@ -940,11 +940,22 @@ def _render_empty_state(config: VerticalConfig) -> None:
 def _select_vertical(vertical_value: str) -> None:
     """on_click of a welcome domain card: select the Vertical, stay on the welcome.
 
-    Writes the sidebar selectbox's own session key, so the welcome and the
-    switcher share ONE source of truth for the active Vertical. Selecting is
-    deliberately NOT entering — that is "Comenzar"'s job (_enter_chat).
+    Writes the flat "vertical" state — the ONE source of truth for the active
+    Vertical, which the sidebar switcher seeds from and syncs back to (see
+    _sync_vertical). Selecting is deliberately NOT entering — that is
+    "Comenzar"'s job (_enter_chat).
     """
     st.session_state["vertical"] = vertical_value
+
+
+def _sync_vertical() -> None:
+    """on_change of the sidebar switcher: copy the widget value to "vertical".
+
+    The widget key and the flat key are deliberately separate — binding the
+    widget directly to "vertical" desyncs on first mount (see the comment at
+    the selectbox in main).
+    """
+    st.session_state["vertical"] = st.session_state["vertical_widget"]
 
 
 def _enter_chat() -> None:
@@ -1152,15 +1163,19 @@ def main() -> None:
     # code that follows is identical regardless of which Vertical is chosen.
     with st.sidebar:
         st.header("Vertical")
+        # "vertical" (flat session state) is the ONE source of truth for the
+        # active Vertical; the widget deliberately has its OWN key. Sharing the
+        # key looked cleaner but desyncs: a value written by a welcome on_click
+        # renders as index 0 on the widget's first mount, and the next rerun
+        # clobbers the session with it (reverting the Vertical to legal).
+        current = st.session_state.setdefault("vertical", values[0])
         vertical_value = st.selectbox(
             "Selecciona el dominio",
             values,
+            index=values.index(current),
             format_func=lambda v: labels.get(v, v),
-            # Shares the welcome's source of truth: the domain card wrote
-            # st.session_state["vertical"] before this widget first exists, so
-            # the widget seeds itself from that key. No index override — with
-            # index=None the widget starts empty instead of reading the key.
-            key="vertical",
+            key="vertical_widget",
+            on_change=_sync_vertical,
         )
 
     # Apply the Citara theme + the selected Vertical's accent before rendering the
