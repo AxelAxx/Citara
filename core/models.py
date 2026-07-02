@@ -98,10 +98,12 @@ RetrievedContext = list[Chunk]
 class Citation(BaseModel):
     """A reference pointing to the SourceDocument (and page) a claim came from.
 
-    A Citation is *always* derived from a ChunkMetadata, never assembled by
-    hand: build it only through :meth:`from_metadata`. Centralizing construction
-    keeps the metadata→citation mapping in one place, so the SourcesPanel can
-    never drift from the provenance the Retriever actually returned.
+    A Citation is *always* derived from the retrieved Chunk, never assembled by
+    hand: build it through :meth:`from_chunk` (which composes
+    :meth:`from_metadata`, the base provenance mapping). Centralizing
+    construction keeps the metadata→citation mapping in one place, so the
+    SourcesPanel can never drift from the provenance the Retriever actually
+    returned.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -109,15 +111,30 @@ class Citation(BaseModel):
     document_id: str
     page: int
     section: str | None = None
+    # Provenance for the source viewer ONLY — never injected into the LLM
+    # prompt (grounding is assembled separately in Generator._build_prompt) and
+    # never inline in the Answer text. Default "" is the fail-safe for
+    # Citations built without a chunk at hand (e.g. an older session history).
+    chunk_text: str = ""
 
     @classmethod
     def from_metadata(cls, metadata: ChunkMetadata) -> Citation:
-        """The single supported constructor: map a Chunk's provenance to a Citation."""
+        """The base provenance mapping: ChunkMetadata → Citation fields."""
         return cls(
             document_id=metadata.document_id,
             page=metadata.page,
             section=metadata.section,
         )
+
+    @classmethod
+    def from_chunk(cls, chunk: Chunk) -> Citation:
+        """Derive a Citation from a retrieved Chunk: base mapping + its text.
+
+        Composes :meth:`from_metadata` (the field mapping lives in one place)
+        and attaches the chunk's text as viewer provenance.
+        """
+        base = cls.from_metadata(chunk.metadata)
+        return base.model_copy(update={"chunk_text": chunk.text})
 
 
 class Answer(BaseModel):

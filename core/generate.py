@@ -183,7 +183,9 @@ class Generator:
         so a clean list of the sources behind the Answer is both honest and
         sufficient — and it keeps the provenance the Retriever actually returned.
         Dedup so two chunks from the same document+page collapse to one Citation,
-        preserving first-seen order (which mirrors relevance order).
+        preserving first-seen order (which mirrors relevance order) — the FIRST
+        chunk seen also contributes ``chunk_text`` (the most relevant passage),
+        which exists for the source viewer only and never enters the prompt.
         """
         citations: list[Citation] = []
         seen: set[tuple[str, int]] = set()
@@ -192,7 +194,7 @@ class Generator:
             if key in seen:
                 continue
             seen.add(key)
-            citations.append(Citation.from_metadata(chunk.metadata))
+            citations.append(Citation.from_chunk(chunk))
         return citations
 
     # --- LLM call (FR7) + preflight (AC7) ------------------------------------

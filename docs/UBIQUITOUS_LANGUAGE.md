@@ -30,7 +30,7 @@
 | **RetrievedContext** | The ordered list of `Chunk`s the `Retriever` returns for a `Query`. The raw material the `Generator` is allowed to use — and nothing else. | `RetrievedContext` |
 | **Generator** | Component that builds the grounded prompt from `RetrievedContext` + `Query`, calls the local LLM (Qwen2.5 through Ollama), and returns an `Answer`. | `Generator` |
 | **Answer** | The Generator's output: the response text **plus** the list of `Citation`s it is grounded on. An Answer without citations is a bug, not a feature. | `Answer` |
-| **Citation** | A reference inside/after an `Answer` pointing to the `SourceDocument` (and page) a claim came from. Derived from `ChunkMetadata`. | `Citation` |
+| **Citation** | A reference inside/after an `Answer` pointing to the `SourceDocument` (and page) a claim came from. Derived from the retrieved `Chunk` (`ChunkMetadata` plus the chunk's text as `chunk_text` — provenance for the source viewer only, never injected into the LLM prompt or the Answer text). | `Citation` |
 | **Grounding** | The principle that every factual claim in an `Answer` must trace back to a `RetrievedContext` chunk. "Not grounded" ⇒ the Generator must abstain (see **Abstention**). | — |
 | **Abstention** | The required behaviour when `RetrievedContext` does not support an answer: the Generator says it cannot find it in the documents instead of inventing one. The opposite of a **Hallucination**. | — |
 | **Hallucination** | Any claim in an `Answer` not supported by `RetrievedContext`. The thing this architecture exists to prevent. | — |

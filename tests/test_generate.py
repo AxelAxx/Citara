@@ -343,3 +343,41 @@ def test_generate_stream_raises_unreachable_before_yielding(monkeypatch):
 
     with pytest.raises(OllamaUnreachableError):
         list(stream)
+
+
+# --- #09-lite: chunk_text provenance on Citations -----------------------------
+
+
+def test_citation_from_chunk_composes_metadata_and_text():
+    from core.models import Citation
+
+    chunk = _chunk("doc-a", 3, "el pasaje citado", section="Artículo 9")
+
+    citation = Citation.from_chunk(chunk)
+
+    # from_metadata's base mapping + the chunk's text on top (viewer provenance).
+    assert (citation.document_id, citation.page, citation.section) == ("doc-a", 3, "Artículo 9")
+    assert citation.chunk_text == "el pasaje citado"
+
+
+def test_citations_carry_chunk_text_and_dedup_keeps_first_seen(monkeypatch):
+    _install_chat(monkeypatch)
+    generator = _make_generator()
+    context = [
+        _chunk("doc-a", 2, "primer fragmento"),
+        _chunk("doc-a", 2, "segundo fragmento"),  # same doc+page: collapses
+        _chunk("doc-b", 5, "otro documento"),
+    ]
+
+    answer = generator.generate(Query(text="x"), context=context)
+
+    # The FIRST chunk seen (relevance order) contributes the text.
+    assert [c.chunk_text for c in answer.citations] == ["primer fragmento", "otro documento"]
+
+
+def test_chunk_text_default_is_empty_fail_safe():
+    from core.models import Citation
+
+    citation = Citation(document_id="d", page=1)
+
+    assert citation.chunk_text == ""

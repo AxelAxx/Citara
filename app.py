@@ -33,6 +33,7 @@ from core.generate import _ABSTENTION_TEXT
 from core.ingest import _load_vertical_config
 from core.models import (
     Answer,
+    Citation,
     CorpusStats,
     EmptyCorpusError,
     ModelNotPulledError,
@@ -244,10 +245,38 @@ html, body, .stApp,
 [data-testid="stExpander"] summary [data-testid="stIconMaterial"]{
   color:var(--accent);
 }
-.sources-list{ display:flex; flex-direction:column; gap:9px; }
+/* Citation rows are horizontal containers (card HTML + a real "Abrir fragmento"
+   button) inside a keyed block — the key lands ON the vertical block itself. */
+[class*="st-key-citara-sources"]{ gap:9px; }
+[class*="st-key-citara-sources"] [data-testid="stHorizontalBlock"]{ gap:9px; align-items:center; }
+[class*="st-key-citara-sources"] [data-testid="stHorizontalBlock"] > div:first-child{
+  flex:1 1 auto; min-width:0; }
 .source-card{ display:flex; align-items:center; gap:13px; padding:13px 14px;
   background:var(--bg); border:1px solid var(--border); border-radius:11px; }
 .source-card:hover{ border-color:var(--accent-line); background:var(--surface2); }
+[class*="st-key-citara-open-frag"] button{ background:transparent; border:1px solid var(--border);
+  border-radius:8px; padding:6px 11px; min-height:0; width:auto; color:var(--muted); }
+[class*="st-key-citara-open-frag"] button:hover,
+[class*="st-key-citara-open-frag"] button:focus-visible,
+[class*="st-key-citara-open-frag"] button:active{
+  border-color:var(--accent-line); background:var(--surface2); color:var(--accent); }
+[class*="st-key-citara-open-frag"] button p{ font-size:11.5px; }
+
+/* ---- Source fragment viewer (#09-lite, tokens from 09-source-viewer.html) -----
+   The dialog shows the REAL chunk text as the mock's paper page. The paper
+   colors are citara.css literals on purpose (a printed page stays light in any
+   theme; they are design tokens, not new colors). Text only — no PDF render,
+   no in-page offsets, no prev/next navigation: that is #09-full. */
+.st-key-citara-fragview .frag-head{ display:flex; align-items:center; gap:8px; margin-bottom:14px; }
+.st-key-citara-fragview .pdf-page{ position:relative; max-width:392px; margin:0 auto;
+  background:#FBFAF6; border:1px solid #E2DDD2; border-radius:5px;
+  box-shadow:0 10px 36px -12px rgba(0,0,0,.45); padding:36px 32px; }
+.st-key-citara-fragview .pdf-page p{ margin:0; font-family:var(--font-serif); font-size:14px;
+  line-height:1.75; color:#2A2620; }
+.st-key-citara-fragview mark.hl{ background:#FBE39A; color:#2A2620; padding:1px 2px;
+  border-radius:2px; box-shadow:0 0 0 2px #FBE39A; }
+.st-key-citara-fragview .frag-note{ margin-top:12px; font-size:11px; color:var(--faint);
+  text-align:center; }
 .src-index{ width:26px; height:26px; flex-shrink:0; border-radius:7px;
   background:var(--accent-tint); border:1px solid var(--accent-line);
   display:flex; align-items:center; justify-content:center;
@@ -1024,11 +1053,37 @@ def _is_abstention_text(text: str) -> bool:
     return text.strip().startswith(_ABSTENTION_TEXT)
 
 
-def _render_sources_panel(answer: Answer) -> None:
+@st.dialog("Fragmento citado")
+def _show_citation_fragment(citation: Citation) -> None:
+    """#09-lite source viewer: the REAL chunk text behind one Citation.
+
+    Styled as the mock's paper page (09-source-viewer.html). Text only, straight
+    from the retrieved Chunk's provenance — no PDF render, no in-page offsets,
+    no prev/next navigation (that is #09-full, a later sub-step).
+    """
+    passage = escape(citation.chunk_text).replace("\n", "<br>")
+    header = (
+        f'<span class="src-id">{escape(citation.document_id)}</span>'
+        f'<span class="src-page">pág. {citation.page}</span>'
+    )
+    if citation.section:
+        header += f'<span class="src-type">{escape(citation.section)}</span>'
+    with st.container(key="citara-fragview"):
+        st.markdown(
+            f'<div class="frag-head">{header}</div>'
+            f'<div class="pdf-page"><p><mark class="hl">{passage}</mark></p></div>'
+            '<div class="frag-note">Fragmento recuperado tal cual del documento.</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def _render_sources_panel(answer: Answer, key_suffix: str = "live") -> None:
     """Render the Citations behind one Answer: document_id + page (+ section).
 
     Abstention is shown explicitly as an expected state (no sources), never styled
     as an error — abstaining is the correct behaviour when context is insufficient.
+    ``key_suffix`` keeps the "Abrir fragmento" button keys unique across the
+    history replay and the live answer (same pattern as the error cards).
     """
     if answer.is_abstention:
         # Calm .note box from the design — neutral greys, no alarm.
@@ -1043,32 +1098,37 @@ def _render_sources_panel(answer: Answer) -> None:
         return
 
     with st.expander(f"Fuentes ({len(answer.citations)})"):
-        # One .source-card per Citation (index chip + mono document_id + page pill,
-        # + section when present). document_id/section come from corpus files, so
-        # escape them before embedding in HTML.
+        # One row per Citation: the .source-card HTML (index chip + mono
+        # document_id + page pill, + section when present) beside a REAL
+        # "Abrir fragmento" button opening the #09-lite viewer. document_id/
+        # section come from corpus files, so escape them before embedding.
         #
-        # TODO: the design's «src-quote» passage and the "Abrir fragmento" viewer
-        # need the chunk text on Citation — requires core/ changes, out of scope.
         # TODO: inline [n] markers in the answer body (the design's .cite) need the
         # Generator to emit marker positions; not built yet.
-        cards: list[str] = []
-        for index, citation in enumerate(answer.citations, start=1):
-            meta = (
-                f'<span class="src-id">{escape(citation.document_id)}</span>'
-                f'<span class="src-page">pág. {citation.page}</span>'
-            )
-            if citation.section:
-                meta += f'<span class="src-type">{escape(citation.section)}</span>'
-            cards.append(
-                '<div class="source-card">'
-                f'<div class="src-index">{index}</div>'
-                f'<div class="src-meta">{meta}</div>'
-                "</div>"
-            )
-        st.markdown(
-            f'<div class="sources-list">{"".join(cards)}</div>',
-            unsafe_allow_html=True,
-        )
+        with st.container(key=f"citara-sources-{key_suffix}"):
+            for index, citation in enumerate(answer.citations, start=1):
+                meta = (
+                    f'<span class="src-id">{escape(citation.document_id)}</span>'
+                    f'<span class="src-page">pág. {citation.page}</span>'
+                )
+                if citation.section:
+                    meta += f'<span class="src-type">{escape(citation.section)}</span>'
+                with st.container(horizontal=True, vertical_alignment="center"):
+                    st.markdown(
+                        '<div class="source-card">'
+                        f'<div class="src-index">{index}</div>'
+                        f'<div class="src-meta">{meta}</div>'
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    # No captured text (e.g. a Citation from an older session
+                    # history) → no button; never open an empty viewer.
+                    if citation.chunk_text:
+                        if st.button(
+                            "Abrir fragmento",
+                            key=f"citara-open-frag-{key_suffix}-{index}",
+                        ):
+                            _show_citation_fragment(citation)
 
 
 # --- chat history (per Vertical) ---------------------------------------------
@@ -1100,7 +1160,7 @@ def _render_history(history: list[dict]) -> None:
             st.markdown(message["text"])
             # Assistant turns carry their Answer so the SourcesPanel survives reruns.
             if message["role"] == "assistant" and answer is not None:
-                _render_sources_panel(answer)
+                _render_sources_panel(answer, key_suffix=f"history-{index}")
 
 
 def _queue_query(question: str) -> None:
@@ -1556,7 +1616,13 @@ def main() -> None:
                     _render_abstention_label()
             else:
                 answer = Answer(text=full_text, citations=streamed.citations)
-            _render_sources_panel(answer)
+            # The suffix must be STABLE across the live→history transition: a
+            # button click reruns the script, where this same panel re-renders
+            # from history — with a different key the clicked widget would not
+            # exist in the new run and the click would be silently dropped.
+            # This assistant turn is appended right below, so its history index
+            # IS len(history) at this moment (the user turn is already in).
+            _render_sources_panel(answer, key_suffix=f"history-{len(history)}")
 
         history.append({"role": "assistant", "text": answer.text, "answer": answer})
 
