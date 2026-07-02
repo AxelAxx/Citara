@@ -4,6 +4,12 @@ display_name: "Asistente de normativa legal"
 corpus_path: "data/legal"
 collection_name: "legal_boe"
 
+# Welcome-card branding (presentation data). domain_sublabel is the source name
+# only — document counts are runtime corpus data, never static config.
+domain_name: "Normativa legal"
+domain_letter: "L"
+domain_sublabel: "BOE"
+
 # Retriever window: 6 — the recall/precision balance. Above the default 5 so
 # relevant chunks that fell just outside the top-5 aren't missed, but back down
 # from 8, where neighbouring low-relevance chunks added noise that degraded core

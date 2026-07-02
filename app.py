@@ -333,6 +333,105 @@ html, body, .stApp,
 .st-key-citara-empty [data-testid="stButton"] > button:active{
   border-color:var(--accent-line); background:var(--surface2); color:var(--text);
 }
+
+/* ---- Welcome / entry screen (tokens from export/screens/01-splash.html) -------
+   Two-step entry: a .domain-card per Vertical SELECTS (active = accent tint +
+   border, the mock's .domain-card.active); the primary "Comenzar" button ENTERS.
+   Cards and CTA are st.button widgets; the letter chip and the sub-label are
+   pseudo-elements whose content/colors are injected per-card in _render_welcome
+   (button labels are plain markdown — they cannot nest styled children). */
+/* Fill the viewport minus Streamlit's header/body chrome and center vertically,
+   so the CTA is visible with NO scroll on a ~768px-tall screen. --logo-size is
+   the one fluid knob for the C¹ mark: the glyphs below derive from it, so the
+   mark scales as one piece instead of drifting apart. */
+.st-key-citara-welcome{ text-align:center; padding:4px 0;
+  /* offset = 60px header + the 3.5rem/1rem page padding set below (~9rem) */
+  min-height:calc(100vh - 9rem); display:flex; flex-direction:column;
+  justify-content:center; align-items:center;
+  --logo-size:clamp(84px, 11vh, 138px);
+  background:radial-gradient(120% 80% at 50% 38%, var(--accent-tint), transparent 55%); }
+/* Streamlit's page container pads ~6rem top — at 768px tall that alone pushes
+   the CTA below the fold. Reclaim it ONLY while the welcome is on the page
+   (:has), so the chat keeps the stock padding. 3.5rem still clears the header. */
+.stApp:has(.st-key-citara-welcome) [data-testid="stMainBlockContainer"]{
+  padding-top:3.5rem; padding-bottom:1rem; }
+/* Compact the container's own vertical rhythm: Streamlit's default 1rem gap ×4
+   element slots is pure air here; halving it buys ~32px at 768px. */
+.st-key-citara-welcome [data-testid="stVerticalBlock"]{ gap:0.4rem; }
+/* guard: keep the inner block full-width under align-items:center, or the card
+   row and the CTA would shrink to fit-content */
+.st-key-citara-welcome > [data-testid="stVerticalBlock"]{ width:100%; }
+/* width:fit-content + margin:auto — Streamlit's markdown container is left-
+   aligned, so text-align centering never reaches this block-level badge */
+.st-key-citara-welcome .welcome-badge{ display:flex; width:fit-content; align-items:center; gap:8px;
+  padding:6px 13px; border-radius:999px; background:var(--surface); border:1px solid var(--border);
+  margin:0 auto clamp(10px, 1.6vh, 17px); font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+/* C¹ mark, fluid between 84px and the design's 138px. Glyph size/position keep
+   the design's ratios of the tile (C = .56 ⇒ 77px at 138; ¹ = .167 ⇒ 23px at
+   .20/.66), resolved against --logo-size instead of fixed px. */
+.st-key-citara-welcome .welcome-logo{ position:relative; width:var(--logo-size); height:var(--logo-size);
+  margin:0 auto clamp(8px, 1.2vh, 10px); border-radius:26%;
+  background:var(--accent-tint); border:1px solid var(--accent-line);
+  display:flex; align-items:center; justify-content:center; }
+.st-key-citara-welcome .welcome-logo::before{ content:'C'; font-family:var(--font-serif); font-weight:600;
+  font-size:calc(var(--logo-size)*.56); line-height:1; letter-spacing:-.02em; color:var(--text); }
+.st-key-citara-welcome .welcome-logo::after{ content:'1'; position:absolute;
+  top:calc(var(--logo-size)*.20); left:calc(var(--logo-size)*.66);
+  font-family:var(--font-mono); font-weight:600; font-size:calc(var(--logo-size)*.167);
+  color:var(--accent); line-height:1; }
+.st-key-citara-welcome .welcome-name{ margin:0 0 clamp(10px, 1.6vh, 16px); font-family:var(--font-serif); font-weight:600;
+  font-size:17px; color:var(--text); text-align:center; }
+/* padding:0 kills Streamlit's markdown-h1 padding (1.25rem/1rem ⇒ +36px) */
+.st-key-citara-welcome .welcome-title{ margin:0 0 clamp(8px, 1.3vh, 10px); padding:0; font-family:var(--font-serif);
+  font-weight:600; font-size:clamp(30px, 4.2vh, 42px); line-height:1.12; letter-spacing:-.02em;
+  color:var(--text); text-align:center; }
+.st-key-citara-welcome .welcome-subtitle{ margin:0 auto clamp(12px, 2.2vh, 22px); max-width:430px; font-size:16px;
+  line-height:1.6; color:var(--muted); text-align:center; }
+.st-key-citara-welcome .welcome-subtitle strong{ color:var(--text); }
+.st-key-citara-welcome .welcome-label{ margin-bottom:8px; text-align:center; }
+/* the two-column card row, centered at the design's 540px */
+.st-key-citara-welcome [data-testid="stHorizontalBlock"]{ max-width:540px; margin:0 auto; gap:12px; }
+/* .domain-card (welcome variant: stacked column) on the st.button */
+.st-key-citara-welcome [data-testid="stButton"] > button{
+  flex-direction:column; align-items:stretch; gap:10px; padding:18px 18px 16px;
+  background:var(--surface); border:1px solid var(--border); border-radius:11px;
+  color:var(--text); min-height:0; width:100%;
+}
+.st-key-citara-welcome [data-testid="stButton"] > button > div{ justify-content:flex-start; }
+.st-key-citara-welcome [data-testid="stButton"] > button [data-testid="stMarkdownContainer"]{
+  text-align:left;
+}
+.st-key-citara-welcome [data-testid="stButton"] > button p{
+  font-size:13.5px; font-weight:600;  /* .domain-name */
+}
+.st-key-citara-welcome [data-testid="stButton"] > button::before{
+  /* .domain-letter chip — neutral until its card is active; the content and the
+     active accent flip are injected per-card in _render_welcome */
+  width:30px; height:30px; border-radius:var(--r-sm); display:flex; align-items:center;
+  justify-content:center; font-family:var(--font-mono); font-size:13px; font-weight:600;
+  background:var(--surface2); color:var(--muted); border:1px solid var(--border);
+}
+.st-key-citara-welcome [data-testid="stButton"] > button::after{
+  /* .domain-meta sub-label; content injected in _render_welcome */
+  font-family:var(--font-mono); font-size:10.5px; color:var(--faint); text-align:left;
+}
+.st-key-citara-welcome [data-testid="stButton"] > button:hover,
+.st-key-citara-welcome [data-testid="stButton"] > button:focus-visible,
+.st-key-citara-welcome [data-testid="stButton"] > button:active{
+  background:var(--surface2); color:var(--text);
+}
+/* .btn-primary "Comenzar" CTA — shape only; its colors follow the SELECTED
+   Vertical and are injected in _render_welcome. Placed after the card rules so
+   its equal-specificity overrides (row layout, no chip) win the source-order tie. */
+.st-key-citara-welcome .st-key-citara-comenzar{ max-width:540px; margin:0 auto; }
+.st-key-citara-welcome .st-key-citara-comenzar button{
+  flex-direction:row; justify-content:center; gap:8px; width:100%; min-height:0;
+  padding:15px; border:none; border-radius:10px;
+  background:var(--accent); color:var(--accent-on);
+}
+.st-key-citara-welcome .st-key-citara-comenzar button > div{ justify-content:center; }
+.st-key-citara-welcome .st-key-citara-comenzar button p{ font-size:15px; font-weight:600; }
+.st-key-citara-welcome .welcome-foot{ font-size:12px; color:var(--faint); text-align:center; }
 </style>
 """
 
@@ -691,6 +790,118 @@ def _render_empty_state(config: VerticalConfig) -> None:
             )
 
 
+def _select_vertical(vertical_value: str) -> None:
+    """on_click of a welcome domain card: select the Vertical, stay on the welcome.
+
+    Writes the sidebar selectbox's own session key, so the welcome and the
+    switcher share ONE source of truth for the active Vertical. Selecting is
+    deliberately NOT entering — that is "Comenzar"'s job (_enter_chat).
+    """
+    st.session_state["vertical"] = vertical_value
+
+
+def _enter_chat() -> None:
+    """on_click of the welcome's "Comenzar" button: enter the chat.
+
+    ``entered`` stays True for the rest of the session — switching Verticals
+    mid-session must never route back through the welcome.
+    """
+    st.session_state["entered"] = True
+
+
+def _render_welcome(options: list[tuple[str, str]]) -> None:
+    """The entry screen: brand, headline, one selectable card per Vertical, CTA.
+
+    Two-step model: a card SELECTS its Vertical; only "Comenzar" ENTERS the
+    chat. Everything on a card is DERIVED, never hardcoded per vertical (golden
+    rule 2): title from domain_name (display_name when unset), chip letter from
+    domain_letter, sub-label from domain_sublabel — all VerticalConfig — and the
+    accent from _ACCENT_BY_VERTICAL. Chip and sub-label are pseudo-elements fed
+    by the data-driven <style> block below, because st.button labels cannot
+    nest styled children.
+    """
+    # A selection must exist before any click so one card renders active and
+    # "Comenzar" has a target: default to the first configured Vertical.
+    st.session_state.setdefault("vertical", options[0][0])
+    selected = st.session_state["vertical"]
+    with st.container(key="citara-welcome"):
+        st.markdown(
+            '<div class="welcome-badge"><span class="dot dot-ok"></span>'
+            "<span>100% local · sin nube</span></div>"
+            '<div class="welcome-logo"></div>'
+            '<div class="welcome-name">Citara</div>'
+            '<h1 class="welcome-title">Pregunta a tus<br>documentos.</h1>'
+            '<p class="welcome-subtitle">Citara responde en español basándose '
+            "<strong>solo</strong> en tus documentos, y cita la fuente exacta de "
+            "cada afirmación. Todo el procesamiento ocurre en tu equipo.</p>"
+            '<div class="label welcome-label">Elige un dominio para empezar</div>',
+            unsafe_allow_html=True,
+        )
+        card_css: list[str] = []
+        selected_title = ""
+        for column, (value, display_name) in zip(st.columns(len(options)), options):
+            config = _load_vertical_config(Vertical(value))
+            accent = _ACCENT_BY_VERTICAL.get(value, _ACCENT_BY_VERTICAL["legal"])
+            # Fail-safe, not fail-silent: an old YAML without domain_name still
+            # renders a titled card — the long display_name — never an empty one.
+            card_title = config.domain_name or display_name
+            card_css.append(
+                # Chip letter is config DATA (domain_letter, not value[0] —
+                # health's chip is "S", not "H"); sub-label has no counts.
+                f".st-key-citara-welcome .st-key-citara-domain-{value} button::before"
+                f"{{content:'{config.domain_letter}';}}"
+                f".st-key-citara-welcome .st-key-citara-domain-{value} button::after"
+                f"{{content:'{config.domain_sublabel}';}}"
+                f".st-key-citara-welcome .st-key-citara-domain-{value} button:hover"
+                f"{{border-color:{accent['line']};}}"
+            )
+            if value == selected:
+                selected_title = card_title
+                # .domain-card.active — accent tint + border on the card, chip
+                # flipped to solid accent (the mock's .active .domain-letter).
+                # Hover/focus states repeated so the generic gray hover above
+                # never washes out the active card.
+                card_css.append(
+                    f".st-key-citara-welcome .st-key-citara-domain-{value} button,"
+                    f".st-key-citara-welcome .st-key-citara-domain-{value} button:hover,"
+                    f".st-key-citara-welcome .st-key-citara-domain-{value} button:focus-visible,"
+                    f".st-key-citara-welcome .st-key-citara-domain-{value} button:active"
+                    f"{{background:{accent['tint']}; border-color:{accent['line']}; color:var(--text);}}"
+                    f".st-key-citara-welcome .st-key-citara-domain-{value} button::before"
+                    f"{{background:{accent['accent']}; color:{accent['on']}; border:none;}}"
+                )
+            with column:
+                st.button(
+                    card_title,
+                    key=f"citara-domain-{value}",
+                    width="stretch",
+                    on_click=_select_vertical,
+                    args=(value,),
+                )
+        # The CTA's colors track the SELECTION, not the page accent — main() brands
+        # the welcome once with the first Vertical, so var(--accent) would lag.
+        cta_accent = _ACCENT_BY_VERTICAL.get(selected, _ACCENT_BY_VERTICAL["legal"])
+        card_css.append(
+            ".st-key-citara-welcome .st-key-citara-comenzar button,"
+            ".st-key-citara-welcome .st-key-citara-comenzar button:hover,"
+            ".st-key-citara-welcome .st-key-citara-comenzar button:focus-visible,"
+            ".st-key-citara-welcome .st-key-citara-comenzar button:active"
+            f"{{background:{cta_accent['accent']}; color:{cta_accent['on']}; border:none;}}"
+        )
+        st.markdown(f"<style>{''.join(card_css)}</style>", unsafe_allow_html=True)
+        st.button(
+            f"Comenzar · {selected_title} →",
+            key="citara-comenzar",
+            width="stretch",
+            on_click=_enter_chat,
+        )
+        st.markdown(
+            '<div class="welcome-foot">No se envía nada a internet · '
+            "sin telemetría · sin cuentas</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def _spinner_until_first_token(text_stream: Iterator[str]) -> Iterator[str]:
     """Pull the first fragment eagerly, then re-emit it followed by the rest.
 
@@ -752,7 +963,18 @@ def main() -> None:
     values = [value for value, _ in options]
     labels = {value: label for value, label in options}
 
-    # Sidebar Vertical selector — the ONLY thing that differs between demos. The UI
+    # Routing: until a domain card is clicked, the welcome IS the page. `entered`
+    # persists for the whole session, so a mid-session Vertical switch (sidebar)
+    # never routes back here; a browser reload starts a fresh session → welcome.
+    if not st.session_state.get("entered", False):
+        # No Vertical picked yet — brand the welcome (and the splash covering it
+        # on first load) with the first configured accent.
+        _inject_theme(values[0])
+        _render_splash()
+        _render_welcome(options)
+        return
+
+    # Sidebar Vertical switcher — the ONLY thing that differs between demos. The UI
     # code that follows is identical regardless of which Vertical is chosen.
     with st.sidebar:
         st.header("Vertical")
@@ -760,6 +982,11 @@ def main() -> None:
             "Selecciona el dominio",
             values,
             format_func=lambda v: labels.get(v, v),
+            # Shares the welcome's source of truth: the domain card wrote
+            # st.session_state["vertical"] before this widget first exists, so
+            # the widget seeds itself from that key. No index override — with
+            # index=None the widget starts empty instead of reading the key.
+            key="vertical",
         )
 
     # Apply the Citara theme + the selected Vertical's accent before rendering the

@@ -57,6 +57,9 @@
 | **SystemPrompt** | The instruction block given to the LLM that enforces Grounding, Abstention, citation format, and Spanish output. Vertical-specific (legal vs clinical tone) but same *rules*. | `system_prompt` |
 | **App** | The Streamlit presentation layer. Reads a `VerticalConfig`, instantiates a `RagEngine`, renders the chat + sources panel. Contains no domain logic. | `app.py` |
 | **example_questions** | Optional per-Vertical list of suggested Queries the App offers on the empty chat state. Pure `VerticalConfig` data — clicking one submits it through the exact same path as a typed Query. | `example_questions: list[str]` |
+| **domain_name** | Optional short Vertical name shown on the welcome domain card and the "Comenzar" CTA (e.g. "Normativa legal"). Empty ⇒ the App falls back to `display_name`. Pure `VerticalConfig` presentation data. | `domain_name: str` |
+| **domain_letter** | Optional single-letter chip identifying a Vertical on its domain card (e.g. "L", "S"). Declared in config, never derived in code — deriving from the enum value would give health an "H", not "S". | `domain_letter: str` |
+| **domain_sublabel** | Optional source label under a domain card's name (e.g. "BOE", "GuíaSalud"). Never carries a document count — real counts are runtime corpus data, not static config. | `domain_sublabel: str` |
 | **SourcesPanel** | The UI element listing the `Citation`s behind the current `Answer`. | — |
 
 ---

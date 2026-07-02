@@ -181,6 +181,14 @@ class VerticalConfig(BaseModel):
     # in Spanish — corpus-facing data, not code). Optional on purpose: a Vertical
     # without them is fully functional and simply shows no suggestions.
     example_questions: list[str] = Field(default_factory=list)
+    # Welcome-screen card branding (Spanish UI data, not code). Optional on
+    # purpose: an older YAML without them still validates — the App falls back
+    # to display_name for the card title and renders no chip/sub-label content.
+    # domain_sublabel names the SOURCE (e.g. "BOE"), never a document count:
+    # real counts are runtime corpus data, not static config.
+    domain_name: str = ""
+    domain_letter: str = ""
+    domain_sublabel: str = ""
 
 
 # --- Domain exceptions -------------------------------------------------------
