@@ -555,6 +555,14 @@ html, body, .stApp,
 .st-key-citara-head .head-subtitle{ margin:0; font-size:14.5px; color:var(--muted);
   max-width:640px; line-height:1.5; }
 .st-key-citara-head .head-subtitle strong{ color:var(--text); font-weight:600; }
+
+/* ---- Chat input hint (tokens from citara.css .input-hint) ---------------------
+   Flows as the LAST element, right above the pinned chat input: Streamlit's
+   bottom container takes no public children, so pinning the hint below the bar
+   (as in the mock) would couple to internal DOM — accepted minimal divergence. */
+.st-key-citara-input-hint .input-hint{ display:flex; align-items:center; gap:14px;
+  flex-wrap:wrap; margin-top:9px; font-size:11px; color:var(--faint); }
+.st-key-citara-input-hint .hint-mono{ font-family:var(--font-mono); }
 </style>
 """
 
@@ -1440,17 +1448,33 @@ def main() -> None:
 
     # st.chat_input is read BEFORE the empty state on purpose: its value decides
     # whether the welcome renders, and the widget pins itself to the bottom of the
-    # page regardless of call order.
-    prompt = st.chat_input("Escribe tu pregunta…") or pending_query
+    # page regardless of call order. The placeholder reuses domain_tagline (#02b)
+    # — per-Vertical data from config, with the generic fail-safe when unset.
+    placeholder = (
+        f"Escribe tu pregunta sobre {config.domain_tagline}…"
+        if config.domain_tagline
+        else "Escribe tu pregunta…"
+    )
+    prompt = st.chat_input(placeholder) or pending_query
 
     if not history and not prompt:
         _render_empty_state(config)
 
     _render_history(history)
 
-    if not prompt:
-        return
-    handle_query(prompt)
+    if prompt:
+        handle_query(prompt)
+
+    # The hint renders AFTER handle_query so it is always the page's last flowed
+    # element, sitting right above the pinned input even on the turn a fresh
+    # answer streams in. Static generic copy — not vertical data.
+    with st.container(key="citara-input-hint"):
+        st.markdown(
+            '<div class="input-hint"><span>Solo se usan los documentos de esta '
+            "colección.</span>"
+            '<span class="hint-mono">Procesado en tu equipo · sin telemetría</span></div>',
+            unsafe_allow_html=True,
+        )
 
 
 main()
