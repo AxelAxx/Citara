@@ -22,6 +22,7 @@ from pathlib import Path
 
 import streamlit as st
 from streamlit.components.v1 import html as _components_html
+from streamlit.delta_generator import DeltaGenerator
 
 from core.engine import RagEngine
 
@@ -497,6 +498,48 @@ html, body, .stApp,
 @keyframes citaraShimmer{ 0%{ background-position:200% 0; } 100%{ background-position:-200% 0; } }
 @keyframes citaraPulse{ 0%,100%{ opacity:.55; } 50%{ opacity:1; } }
 @keyframes citaraDots{ 0%,80%,100%{ opacity:.25; transform:translateY(0); } 40%{ opacity:1; transform:translateY(-2px); } }
+
+/* ---- Sidebar (tokens from export/screens/02-chat.html: .brand / .local-badge /
+   .section-label / .foot-note) --------------------------------------------------
+   Everything on the badge is REAL data (VerticalConfig + this run's preflight);
+   it renders into a slot filled after _check_dependencies. Scoped under the
+   keyed container so nothing leaks outside the sidebar. */
+.st-key-citara-sidebar .side-brand{ display:flex; align-items:center; gap:11px; padding:0 4px 4px; }
+/* C¹ mark at the design's 38px (same pseudo-element monogram as the chat avatar;
+   em math: C = .56em ⇒ 21px, ¹ ⇒ 7px) */
+.st-key-citara-sidebar .side-brand-mark{ position:relative; width:38px; height:38px; flex-shrink:0;
+  border-radius:26%; background:var(--accent-tint); border:1px solid var(--accent-line);
+  display:flex; align-items:center; justify-content:center; }
+.st-key-citara-sidebar .side-brand-mark::before{ content:'C'; font-family:var(--font-serif); font-weight:600;
+  line-height:1; letter-spacing:-.02em; font-size:21px; color:var(--text); }
+.st-key-citara-sidebar .side-brand-mark::after{ content:'1'; position:absolute; top:7px; left:25px;
+  line-height:1; font-family:var(--font-mono); font-weight:600; font-size:7px; color:var(--accent); }
+.st-key-citara-sidebar .side-brand-text{ display:flex; flex-direction:column; line-height:1.15; gap:1px; }
+.st-key-citara-sidebar .side-brand-name{ font-family:var(--font-serif); font-weight:600; font-size:18px;
+  color:var(--text); }
+.st-key-citara-sidebar .side-brand-sub{ font-size:11.5px; color:var(--faint); }
+/* .card .local-badge */
+.st-key-citara-sidebar .side-badge{ background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-md); padding:12px 13px; }
+.st-key-citara-sidebar .side-badge-status{ display:flex; align-items:center; gap:8px; margin-bottom:7px;
+  font-size:12.5px; font-weight:600; color:var(--text); }
+/* amber twin of .dot-ok for the two degraded states; --warn-tint is the halo */
+.st-key-citara-sidebar .dot-warn{ background:var(--warn); box-shadow:0 0 0 3px var(--warn-tint); }
+/* neutral gray dot for the "Conectando…" interim (engine rebuild in progress) */
+.st-key-citara-sidebar .dot-neutral{ background:var(--faint); box-shadow:0 0 0 3px var(--surface2); }
+.st-key-citara-sidebar .side-badge-model{ font-family:var(--font-mono); font-size:11px;
+  color:var(--muted); margin-bottom:8px; }
+.st-key-citara-sidebar .side-badge-local{ font-family:var(--font-mono); font-size:11px; color:var(--faint);
+  border-top:1px solid var(--border); padding-top:8px; }
+.st-key-citara-sidebar .side-section-label{ padding:0 4px; }
+.st-key-citara-sidebar .side-foot{ padding:14px 4px 0; border-top:1px solid var(--border);
+  font-size:11px; color:var(--faint); line-height:1.5; }
+/* pin the foot-note to the sidebar bottom (.foot-note's margin-top:auto): the
+   keyed class lands ON the stVerticalBlock itself (a flex column) — stretch it
+   to the sidebar height and push its last child down. 10rem ≈ the sidebar's
+   own chrome (collapse header + paddings) above/below the block. */
+.st-key-citara-sidebar{ min-height:calc(100vh - 10rem); }
+.st-key-citara-sidebar > div:last-child{ margin-top:auto; }
 </style>
 """
 
@@ -777,21 +820,58 @@ def _render_error_card(
                     _show_install_guide(llm_model, host)
 
 
-def _check_dependencies(engine: RagEngine, config: VerticalConfig) -> bool:
+def _check_dependencies(engine: RagEngine, config: VerticalConfig) -> RagEngineError | None:
     """Run the aggregated preflight, surfacing domain errors as actionable UI.
 
-    Returns True when all prerequisites are met. On failure we render the exact,
-    actionable fix (start Ollama / pull the model / ingest the corpus) as the
-    design's error card rather than a raw traceback, and return False so the
-    caller can block querying. Runs on EVERY rerun — that is what makes the
-    card's "Reintentar conexión" (a plain rerun) honest.
+    Returns None when all prerequisites are met; on failure it renders the
+    exact, actionable fix as the design's error card rather than a raw
+    traceback, and returns the domain error. The caller derives its boolean
+    query gate from it AND the sidebar badge derives its honest state — both
+    from this ONE check_health call per rerun (which is also what makes the
+    card's "Reintentar conexión", a plain rerun, honest).
     """
     try:
         engine.check_health()
-        return True
+        return None
     except RagEngineError as exc:
         _render_error_card(**_error_presentation(exc, config), key_suffix="preflight")
-    return False
+        return exc
+
+
+def _render_ollama_badge(
+    slot: DeltaGenerator,
+    config: VerticalConfig,
+    preflight_error: RagEngineError | None,
+    connecting: bool = False,
+) -> None:
+    """Fill the sidebar's .local-badge slot with the REAL Ollama state.
+
+    Three honest states from the preflight that already ran (never a second
+    check_health, never a hardcoded green): connected, model-not-pulled (the
+    server DID answer — claiming "no connection" would lie the other way), and
+    unreachable. ``connecting`` paints the honest interim while the engine
+    (re)builds — the slot must never sit empty during a Vertical switch; the
+    real state overwrites this same slot once the preflight resolves. Model
+    and host come from VerticalConfig, not mock literals.
+    """
+    if connecting:
+        dot, status = "dot-neutral", "Conectando…"
+    elif preflight_error is None:
+        dot, status = "dot-ok", "Conectado a Ollama"
+    elif isinstance(preflight_error, ModelNotPulledError):
+        dot, status = "dot-warn", "Modelo no descargado"
+    else:
+        dot, status = "dot-warn", "Sin conexión con Ollama"
+    host = escape(config.ollama_base_url.removeprefix("http://").removeprefix("https://"))
+    slot.markdown(
+        '<div class="side-badge">'
+        f'<div class="side-badge-status"><span class="dot {dot}"></span>'
+        f"<span>{status}</span></div>"
+        f'<div class="side-badge-model">{escape(config.llm_model)} · {host}</div>'
+        '<div class="side-badge-local">Sin conexión a la nube · 100% local</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # --- SourcesPanel (FR9/AC2) --------------------------------------------------
@@ -1159,10 +1239,24 @@ def main() -> None:
         _render_welcome(options)
         return
 
-    # Sidebar Vertical switcher — the ONLY thing that differs between demos. The UI
-    # code that follows is identical regardless of which Vertical is chosen.
-    with st.sidebar:
-        st.header("Vertical")
+    # Sidebar: brand, Ollama-badge slot, Vertical switcher, foot-note (tokens from
+    # export/screens/02-chat.html). The badge state needs the preflight result,
+    # which only exists once the engine below is built — the st.empty slot keeps
+    # the badge ABOVE the switcher while its content arrives later. The switcher
+    # is the ONLY thing that differs between demos; everything after it is
+    # identical regardless of which Vertical is chosen.
+    with st.sidebar, st.container(key="citara-sidebar"):
+        st.markdown(
+            '<div class="side-brand"><span class="side-brand-mark"></span>'
+            '<span class="side-brand-text"><span class="side-brand-name">Citara</span>'
+            '<span class="side-brand-sub">Respuestas con fuente</span></span></div>',
+            unsafe_allow_html=True,
+        )
+        badge_slot = st.empty()
+        st.markdown(
+            '<div class="label side-section-label">Dominio activo</div>',
+            unsafe_allow_html=True,
+        )
         # "vertical" (flat session state) is the ONE source of truth for the
         # active Vertical; the widget deliberately has its OWN key. Sharing the
         # key looked cleaner but desyncs: a value written by a welcome on_click
@@ -1176,6 +1270,13 @@ def main() -> None:
             format_func=lambda v: labels.get(v, v),
             key="vertical_widget",
             on_change=_sync_vertical,
+            # the mock's .section-label above replaces the widget's visible
+            # label; the label itself stays for accessibility
+            label_visibility="collapsed",
+        )
+        st.markdown(
+            '<div class="side-foot">Todo el procesamiento ocurre en tu equipo.</div>',
+            unsafe_allow_html=True,
         )
 
     # Apply the Citara theme + the selected Vertical's accent before rendering the
@@ -1189,6 +1290,10 @@ def main() -> None:
     _render_splash()
 
     config: VerticalConfig = _load_vertical_config(Vertical(vertical_value))
+    # The engine (re)build below can block for seconds (warm-up on a Vertical
+    # switch): paint the honest "Conectando…" interim now — earliest point where
+    # config (the badge's model line) exists — so the slot never sits empty.
+    _render_ollama_badge(badge_slot, config, None, connecting=True)
     st.title(config.display_name)  # branding from VerticalConfig
     st.caption("Pregunta en español; las respuestas se basan solo en los documentos.")
 
@@ -1197,10 +1302,14 @@ def main() -> None:
     except RagEngineError as exc:
         # A failure to even build the engine (e.g. a missing dependency) — actionable.
         # cache_resource does not memoize exceptions, so the retry rerun rebuilds.
+        # Fill the badge honestly before stopping: an empty slot reads as broken.
+        _render_ollama_badge(badge_slot, config, exc)
         _render_error_card(**_error_presentation(exc, config), key_suffix="engine")
         st.stop()
 
-    dependencies_ok = _check_dependencies(engine, config)
+    preflight_error = _check_dependencies(engine, config)
+    dependencies_ok = preflight_error is None
+    _render_ollama_badge(badge_slot, config, preflight_error)
 
     history = _history_for(vertical_value)
 
