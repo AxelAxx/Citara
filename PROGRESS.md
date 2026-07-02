@@ -143,6 +143,15 @@ Vertical `legal` (BOE) ya integrada (G1 demostrable). Foco actual: pulido de UX
 
 ---
 
+## Deuda técnica (no bloqueante)
+
+- **core/generate.py**: streaming mid-flight connection drop escapes as raw requests
+  exception (`iter_lines`); wrap in `RagEngineError`. Deferred — core/ work, not UI.
+  (Descubierto verificando #05a: con tokens ya fluyendo, un corte de Ollama saldría
+  como traceback crudo en vez de la error card.)
+
+---
+
 ## Criterios de aceptación — checklist
 
 - [x] AC1 — ingesta persiste + idempotente — **validado en vivo sobre corpus health real**
