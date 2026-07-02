@@ -149,6 +149,9 @@ Vertical `legal` (BOE) ya integrada (G1 demostrable). Foco actual: pulido de UX
   exception (`iter_lines`); wrap in `RagEngineError`. Deferred — core/ work, not UI.
   (Descubierto verificando #05a: con tokens ya fluyendo, un corte de Ollama saldría
   como traceback crudo en vez de la error card.)
+- **source fragment viewer (#09-lite)**: shows raw extraction artifacts (markdown
+  headers, `<sup>` tags); clean for display in #09-full or at ingest, not the lite
+  viewer.
 
 ---
 
