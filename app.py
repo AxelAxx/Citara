@@ -272,10 +272,17 @@ html, body, .stApp,
 .note-sub{ font-family:var(--font-mono); font-size:11px; color:var(--faint); }
 
 /* ---- Actionable error card (ported from export/screens/05-errors.html) --------
-   .state-card.warn with the warn tokens — amber "here's the fix", not red alarm;
-   every RagEngineError carries its own actionable message. */
+   Warn tokens — amber "here's the fix", not red alarm. The card look sits on the
+   KEYED container (st-key-citara-error-<suffix>): the card mixes raw HTML
+   (label/icon/title/body) with real widgets — st.code for a NATIVE copy button,
+   st.button for retry/guide — so the amber border must wrap them all.
+   Prefix-matched selectors because the key carries a per-instance suffix (the
+   history replay can put several cards on one page). */
 .state-card{ background:var(--bg); border:1px solid var(--border); border-radius:16px; padding:20px; }
 .state-card.warn{ border-color:var(--warn-line); }
+[class*="st-key-citara-error-"]{ background:var(--bg); border:1px solid var(--warn-line);
+  border-radius:16px; padding:20px; }
+[class*="st-key-citara-error-"] [data-testid="stVerticalBlock"]{ gap:0.55rem; }
 .err-label{ font-size:10.5px; margin-bottom:14px; }
 .err-row{ display:flex; gap:13px; }
 .err-icon{ width:30px; height:30px; flex-shrink:0; border-radius:9px; background:var(--warn-tint);
@@ -283,14 +290,35 @@ html, body, .stApp,
   font-family:var(--font-serif); font-weight:600; font-size:16px; color:var(--warn); }
 .err-main{ flex:1; min-width:0; }
 .err-title{ font-size:15px; font-weight:600; margin-bottom:5px; }
-.err-body{ font-size:13.5px; line-height:1.55; color:var(--muted); margin-bottom:13px; }
+.err-body{ font-size:13.5px; line-height:1.55; color:var(--muted); }
 .err-body .err-code{ color:var(--text); font-size:12.5px; }
-.cmd{ display:flex; align-items:center; gap:8px; background:var(--bg2); border:1px solid var(--border);
-  border-radius:9px; padding:9px 12px; }
-.cmd + .cmd{ margin-top:8px; }
-.cmd .sym{ font-family:var(--font-mono); font-size:12px; color:var(--warn); }
-/* undo Streamlit's markdown <code> chrome (pink text, tinted bg) inside the chip */
-.cmd code{ font-family:var(--font-mono); font-size:12.5px; color:var(--text); background:none; padding:0; }
+/* the raw English exception, kept visible as an honest secondary trace */
+.err-tech{ margin-top:6px; font-family:var(--font-mono); font-size:10.5px; color:var(--faint);
+  line-height:1.5; overflow-wrap:anywhere; }
+/* command chip + buttons are Streamlit widgets rendered AFTER the HTML block;
+   43px inset = icon 30px + the row's 13px gap, aligning them under the body */
+[class*="st-key-citara-error-"] [data-testid="stCode"]{ margin-left:43px; }
+[class*="st-key-citara-error-"] [data-testid="stCode"] pre{
+  background:var(--bg2) !important; border:1px solid var(--border); border-radius:9px;
+  font-family:var(--font-mono); font-size:12.5px; padding:9px 12px; }
+[class*="st-key-citara-error-"] [data-testid="stHorizontalBlock"]{ margin-left:43px; gap:10px; }
+/* .btn-warn / .btn from citara.css; hover/focus repeated so Streamlit's default
+   primary-color hover never tints these */
+[class*="st-key-citara-retry"] button,
+[class*="st-key-citara-retry"] button:hover,
+[class*="st-key-citara-retry"] button:focus-visible,
+[class*="st-key-citara-retry"] button:active{
+  border:none; border-radius:10px; padding:10px 18px; min-height:0; width:auto;
+  background:var(--warn); color:var(--bg2); }
+[class*="st-key-citara-retry"] button p{ font-size:13.5px; font-weight:600; }
+[class*="st-key-citara-guide"] button{
+  border:1px solid var(--border-strong); border-radius:10px; padding:10px 18px;
+  min-height:0; width:auto; background:transparent; color:var(--muted); }
+[class*="st-key-citara-guide"] button:hover,
+[class*="st-key-citara-guide"] button:focus-visible,
+[class*="st-key-citara-guide"] button:active{
+  border-color:var(--border-strong); background:var(--surface2); color:var(--text); }
+[class*="st-key-citara-guide"] button p{ font-size:13.5px; }
 
 /* ---- Empty chat state (ported from export/screens/03-chat-empty.html) ---------
    Shown only while the active Vertical's history is empty. The suggestions are
@@ -622,67 +650,147 @@ def _load_engine(vertical_value: str) -> RagEngine:
 
 # --- error translation (NFR6/AC7) --------------------------------------------
 
-# Exception type → (category, title) for the actionable error card, checked in
-# order (most specific first); anything else falls back to the generic entry in
-# _error_presentation. Titles are the user-facing Spanish headline; the exception
-# text itself (with the fix) becomes the card body.
-_ERROR_PRESENTATION: list[tuple[type[RagEngineError], tuple[str, str]]] = [
-    (OllamaUnreachableError, ("servicio", "Ollama no está disponible")),
-    (ModelNotPulledError, ("modelo", "Falta un modelo en Ollama")),
-    (EmptyCorpusError, ("corpus", "El corpus está vacío")),
-]
+# All user-visible error copy is born HERE, in Spanish: core/ raises technical
+# English messages (those are code, kept as the .err-tech trace), and this layer
+# maps the TYPED exception to the mock's actionable card. Commands and model
+# names come from the VerticalConfig — never from mock literals (the mock says
+# "llama3.1 · 4,7 GB"; the real model is whatever llm_model says, and the weight
+# is omitted because there is no reliable source for it).
 
-# Backticked segments inside domain-error messages; the ones that look like shell
-# commands get promoted to a copy-friendly command chip on the card.
-_BACKTICKED = re.compile(r"`([^`]+)`")
-_CMD_PREFIXES = ("ollama ", "python ", "streamlit ", "pip ", "uv ")
+# core quotes the offending model name single-quoted in its messages.
+_QUOTED = re.compile(r"'([^']+)'")
 
 
-def _error_presentation(exc: RagEngineError) -> dict[str, str]:
-    """Map a domain error to the card fields (category, title, detail)."""
-    for exc_type, (category, title) in _ERROR_PRESENTATION:
-        if isinstance(exc, exc_type):
-            return {"category": category, "title": title, "detail": str(exc)}
-    return {"category": "motor", "title": "No se pudo completar la operación", "detail": str(exc)}
+def _error_presentation(exc: RagEngineError, config: VerticalConfig) -> dict[str, str | None]:
+    """Map a domain error to the card fields (Spanish copy + real command)."""
+    host = escape(config.ollama_base_url.removeprefix("http://").removeprefix("https://"))
+    if isinstance(exc, OllamaUnreachableError):
+        return {
+            "kind": "servicio",
+            "title": "Ollama no está disponible",
+            "body": (
+                "No se pudo conectar con el modelo local en "
+                f'<span class="mono err-code">{host}</span>. '
+                "Arráncalo en una terminal y reintenta."
+            ),
+            "command": "ollama serve",
+            "technical": str(exc),
+            "llm_model": config.llm_model,
+            "host": config.ollama_base_url,
+        }
+    if isinstance(exc, ModelNotPulledError):
+        # The missing model can be the LLM or the Embedder's (both preflights
+        # raise this type); core carries it single-quoted in the message. The
+        # llm_model fallback keeps the command real either way.
+        match = _QUOTED.search(str(exc))
+        model = match.group(1) if match else config.llm_model
+        return {
+            "kind": "modelo",
+            "title": "El modelo no está descargado",
+            "body": (
+                f'El modelo <span class="mono err-code">{escape(model)}</span> '
+                "no está en Ollama. Descárgalo una sola vez para empezar."
+            ),
+            "command": f"ollama pull {model}",
+            "technical": str(exc),
+            "llm_model": config.llm_model,
+            "host": config.ollama_base_url,
+        }
+    if isinstance(exc, EmptyCorpusError):
+        return {
+            "kind": "corpus",
+            "title": "El corpus está vacío",
+            "body": (
+                "No hay documentos ingestados para esta Vertical. Coloca los PDF en "
+                f'<span class="mono err-code">{escape(config.corpus_path)}</span> '
+                "y lanza la ingesta desde una terminal."
+            ),
+            "command": f"python -m core.ingest --vertical {config.vertical.value}",
+            "technical": str(exc),
+        }
+    return {
+        "kind": "motor",
+        "title": "No se pudo completar la operación",
+        "body": (
+            "La operación falló de forma inesperada. El detalle técnico de "
+            "abajo indica la causa."
+        ),
+        "technical": str(exc),
+    }
 
 
-def _render_error_card(category: str, title: str, detail: str) -> None:
-    """Render an actionable error as the design's state-card (05-errors.html).
+@st.dialog("Poner Ollama en marcha")
+def _show_install_guide(llm_model: str, host: str) -> None:
+    """Spanish step-by-step to install/start Ollama and pull the model.
 
-    The card body is the exception's own message (already actionable, golden
-    rule 5); any backticked shell command in it is additionally lifted into a
-    `$ …` command chip so the fix is copy-friendly. Warn tokens, never red.
+    Real commands only, model/host from VerticalConfig — the same honesty rule
+    as the card itself.
     """
-    body = escape(detail)
-    chips = "".join(
-        f'<div class="cmd"><span class="sym">$</span><code>{command}</code></div>'
-        for command in _BACKTICKED.findall(body)
-        if command.startswith(_CMD_PREFIXES)
-    )
-    body = _BACKTICKED.sub(r'<span class="mono err-code">\1</span>', body)
     st.markdown(
-        '<div class="state-card warn">'
-        f'<div class="label err-label">Error accionable · {escape(category)}</div>'
-        '<div class="err-row"><div class="err-icon">!</div>'
-        f'<div class="err-main"><div class="err-title">{escape(title)}</div>'
-        f'<div class="err-body">{body}</div>{chips}</div></div></div>',
-        unsafe_allow_html=True,
+        "**1 · Instala Ollama** (una sola vez) desde "
+        "[ollama.com/download](https://ollama.com/download)."
     )
+    st.markdown(f"**2 · Arranca el servidor** en una terminal; debe quedar escuchando en `{host}`:")
+    st.code("ollama serve", language="bash")
+    st.markdown("**3 · Descarga el modelo** (una sola vez):")
+    st.code(f"ollama pull {llm_model}", language="bash")
+    st.markdown("**4 · Vuelve aquí** y pulsa «Reintentar conexión».")
 
 
-def _check_dependencies(engine: RagEngine) -> bool:
+def _render_error_card(
+    kind: str,
+    title: str,
+    body: str,
+    command: str | None = None,
+    technical: str | None = None,
+    llm_model: str | None = None,
+    host: str | None = None,
+    key_suffix: str = "live",
+) -> None:
+    """Render an actionable error as the mock's state-card (05-errors.html).
+
+    HTML paints the static part (``body`` is presentation-crafted HTML; dynamic
+    values are escaped in _error_presentation). The command is st.code so the
+    copy button is REAL (native), and the buttons are real widgets: retry reruns
+    the script — the health preflight re-executes on every run — and the guide
+    opens a dialog. ``key_suffix`` keeps widget keys unique: the history replay
+    plus a live card can put several of these on one page.
+    """
+    tech_html = f'<div class="err-tech">{escape(technical)}</div>' if technical else ""
+    with st.container(key=f"citara-error-{key_suffix}"):
+        st.markdown(
+            f'<div class="label err-label">Error accionable · {escape(kind)}</div>'
+            '<div class="err-row"><div class="err-icon">!</div>'
+            f'<div class="err-main"><div class="err-title">{escape(title)}</div>'
+            f'<div class="err-body">{body}</div>{tech_html}</div></div>',
+            unsafe_allow_html=True,
+        )
+        if command:
+            st.code(command, language="bash")
+        # Buttons only where they are functional (the Ollama cards). Download
+        # arrives in #05b; "choose another model" is icebox — neither is faked.
+        if kind in ("servicio", "modelo") and llm_model and host:
+            with st.container(horizontal=True):
+                if st.button("Reintentar conexión", key=f"citara-retry-{key_suffix}"):
+                    st.rerun()
+                if st.button("Ver guía de instalación", key=f"citara-guide-{key_suffix}"):
+                    _show_install_guide(llm_model, host)
+
+
+def _check_dependencies(engine: RagEngine, config: VerticalConfig) -> bool:
     """Run the aggregated preflight, surfacing domain errors as actionable UI.
 
     Returns True when all prerequisites are met. On failure we render the exact,
     actionable fix (start Ollama / pull the model / ingest the corpus) as the
     design's error card rather than a raw traceback, and return False so the
-    caller can block querying.
+    caller can block querying. Runs on EVERY rerun — that is what makes the
+    card's "Reintentar conexión" (a plain rerun) honest.
     """
     try:
         engine.check_health()
         return True
     except RagEngineError as exc:
-        _render_error_card(**_error_presentation(exc))
+        _render_error_card(**_error_presentation(exc, config), key_suffix="preflight")
     return False
 
 
@@ -770,11 +878,13 @@ def _history_for(vertical_value: str) -> list[dict]:
 
 
 def _render_history(history: list[dict]) -> None:
-    for message in history:
+    for index, message in enumerate(history):
         with st.chat_message(message["role"]):
             # Failed turns re-render as the same actionable card, not raw text.
+            # Index-suffixed keys: several failed turns = several cards, and
+            # their retry/guide buttons must not collide.
             if message.get("error") is not None:
-                _render_error_card(**message["error"])
+                _render_error_card(**message["error"], key_suffix=f"history-{index}")
                 continue
             answer = message.get("answer")
             # Design order: the abstention pill sits ABOVE the answer body.
@@ -1014,12 +1124,13 @@ def main() -> None:
         # legal accent) just so this card renders styled.
         _inject_theme("legal")
         _render_error_card(
-            category="config",
+            kind="config",
             title="No hay ninguna Vertical configurada",
-            detail=(
+            body=escape(
                 "Añade config/<vertical>.yaml (p. ej. config/health.yaml) antes "
                 "de arrancar la app."
             ),
+            key_suffix="boot",
         )
         st.stop()
 
@@ -1070,10 +1181,11 @@ def main() -> None:
         engine = _load_engine(vertical_value)
     except RagEngineError as exc:
         # A failure to even build the engine (e.g. a missing dependency) — actionable.
-        _render_error_card(**_error_presentation(exc))
+        # cache_resource does not memoize exceptions, so the retry rerun rebuilds.
+        _render_error_card(**_error_presentation(exc, config), key_suffix="engine")
         st.stop()
 
-    dependencies_ok = _check_dependencies(engine)
+    dependencies_ok = _check_dependencies(engine, config)
 
     history = _history_for(vertical_value)
 
@@ -1084,9 +1196,9 @@ def main() -> None:
         instead of threading them through parameters or session state.
         """
         if not dependencies_ok:
-            # Dependencies are down; the error is already on screen. Don't attempt
-            # a query that would only fail deeper in.
-            st.warning("Resuelve el problema indicado arriba antes de preguntar.")
+            # Dependencies are down; the actionable card — with its own retry —
+            # is already on screen. Don't attempt a query that would only fail
+            # deeper in, and don't stack a redundant banner (not in the mock).
             return
 
         # Show the user's question immediately, before any generation, so the slow
@@ -1138,8 +1250,10 @@ def main() -> None:
                 # model not pulled) all carry actionable messages — Ollama-down
                 # raises on the first streamed fragment, before any text is shown.
                 # Surface them as the design's error card, keep the app alive.
-                presentation = _error_presentation(exc)
-                _render_error_card(**presentation)
+                presentation = _error_presentation(exc, config)
+                # "live-" prefix: this run's history was replayed with
+                # "history-N" suffixes, so the in-flight card can never collide.
+                _render_error_card(**presentation, key_suffix=f"live-{len(history)}")
                 history.append(
                     {"role": "assistant", "text": str(exc), "answer": None, "error": presentation}
                 )
