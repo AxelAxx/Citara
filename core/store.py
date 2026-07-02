@@ -40,6 +40,7 @@ from dataclasses import dataclass
 
 from core.models import (
     ChunkMetadata,
+    CorpusStats,
     Embedding,
     RagEngineError,
     RetrievalError,
@@ -200,6 +201,42 @@ class VectorStore:
             ) from exc
 
         return self._to_hits(raw)
+
+    def corpus_stats(self, embedding_model: str) -> CorpusStats:
+        """Read-only snapshot of the Collection: counts + distinct document_ids.
+
+        ``embedding_model`` arrives as plain DATA — the store carries no config
+        knowledge; the engine feeds it from the one configured source (golden
+        rule 4). Full metadata read acceptable at MVP corpus size (~4k chunks);
+        Chroma has no distinct-count aggregation — revisit at millions. Zero
+        mutation of the Collection.
+        """
+        collection = self._get_collection()
+        try:
+            chunk_count = collection.count()
+            metadatas = collection.get(include=["metadatas"]).get("metadatas") or []
+        except Exception as exc:
+            raise RetrievalError(
+                f"Could not read Collection '{self.collection_name}' at "
+                f"'{self.persist_path}' for corpus stats. Verify the chroma_db "
+                "directory is accessible and the vertical has been ingested."
+            ) from exc
+
+        # Distinct ids in ONE pass via a set (never `in list`, O(n²)); sorted()
+        # because Chroma's get() guarantees no order — an unsorted list would
+        # shuffle between reruns.
+        distinct: set[str] = {
+            metadata["document_id"]
+            for metadata in metadatas
+            if metadata and "document_id" in metadata
+        }
+        document_ids = sorted(distinct)
+        return CorpusStats(
+            document_count=len(document_ids),
+            chunk_count=chunk_count,
+            embedding_model=embedding_model,
+            document_ids=document_ids,
+        )
 
     @staticmethod
     def _to_hits(raw: dict) -> list[QueryHit]:

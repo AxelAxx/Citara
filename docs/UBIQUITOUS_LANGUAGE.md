@@ -16,6 +16,7 @@
 | **Engine** | The vertical-agnostic RAG pipeline. Knows nothing about "legal" or "health"; it is configured by a `VerticalConfig`. The whole reason the project exists: one Engine, many verticals. | `RagEngine` |
 | **Vertical** | A business domain the Engine is pointed at (e.g. `legal`, `health`). A Vertical is *data + config*, never code. Adding a Vertical must require zero changes to `core/`. | `Vertical` (enum), `VerticalConfig` |
 | **Corpus** | The full set of `SourceDocument`s belonging to one Vertical. Lives under `data/<vertical>/`. | `Corpus` |
+| **CorpusStats** | Read-only snapshot of one Vertical's ingested Corpus: distinct `SourceDocument` count and ids, `Chunk` count, and the embedding model in use. Produced by the `VectorStore`, exposed via `RagEngine.corpus_stats()`. Carries no ingest timestamp (ChromaDB stores none reliably) and no per-document page ranges (v2). | `CorpusStats` |
 | **SourceDocument** | One original file as downloaded (a PDF from BOE, GuíaSalud, etc.) before any processing. Identified by a stable `document_id`. | `SourceDocument` |
 | **document_id** | Stable, human-meaningful identifier of a `SourceDocument`, used in citations. For legal, prefer the official id (e.g. `BOE-A-2015-11430`); otherwise the slugified filename. | `document_id: str` |
 | **Chunk** | A contiguous slice of a `SourceDocument`'s text, the atomic unit that gets embedded and retrieved. Carries `ChunkMetadata`. Never store a chunk without its metadata. | `Chunk` |

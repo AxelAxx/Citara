@@ -154,6 +154,23 @@ class Answer(BaseModel):
         return cls(text=text, citations=[], is_abstention=True)
 
 
+class CorpusStats(BaseModel):
+    """Read-only snapshot of one Vertical's ingested Corpus.
+
+    Data only, produced by the VectorStore adapter and exposed through
+    ``RagEngine.corpus_stats()``. Deliberately carries NO ingest timestamp
+    (ChromaDB stores none reliably — inventing one would be dishonest) and no
+    per-document page ranges (v2).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    document_count: int
+    chunk_count: int
+    embedding_model: str
+    document_ids: list[str]
+
+
 class VerticalConfig(BaseModel):
     """Declarative description of a Vertical — the only thing that changes between
     legal and health (FR10). Loaded from ``config/<vertical>.yaml``.

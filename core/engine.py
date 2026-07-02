@@ -25,7 +25,15 @@ from dataclasses import dataclass
 from core.embed import OllamaEmbedder
 from core.generate import Generator
 from core.ingest import _load_vertical_config  # see TODO(module 9) below
-from core.models import Answer, Citation, Query, Vertical, VerticalConfig
+from core.models import (
+    Answer,
+    Citation,
+    CorpusStats,
+    Query,
+    RagEngineError,
+    Vertical,
+    VerticalConfig,
+)
 from core.retrieve import Retriever
 from core.store import VectorStore
 
@@ -67,6 +75,7 @@ class RagEngine:
         top_k: int,
         *,
         embedder: OllamaEmbedder | None = None,
+        vector_store: VectorStore | None = None,
     ) -> None:
         self._retriever = retriever
         self._generator = generator
@@ -74,6 +83,9 @@ class RagEngine:
         # Held only so check_health() can delegate to the Embedder preflight as well
         # as the Generator's; not used on the query path.
         self._embedder = embedder
+        # Held only so corpus_stats() can delegate to the store (same pattern as
+        # _embedder above); the query path keeps reaching the store via Retriever.
+        self._vector_store = vector_store
 
     # --- factories (the composition root) ------------------------------------
 
@@ -103,6 +115,7 @@ class RagEngine:
             generator=generator,
             top_k=config.top_k,
             embedder=embedder,
+            vector_store=vector_store,
         )
 
     @classmethod
@@ -186,3 +199,23 @@ class RagEngine:
         if self._embedder is not None:
             self._embedder.check_health()
         self._generator.check_health()
+
+    # --- read-only Corpus snapshot --------------------------------------------
+
+    def corpus_stats(self) -> CorpusStats:
+        """Expose the Corpus snapshot — a façade that delegates to the VectorStore.
+
+        The engine neither counts nor knows Chroma; it forwards the embedding
+        model name from the SAME Embedder the ingest/query paths use (golden
+        rule 4: one source, impossible to desynchronize). Engines built through
+        the plain test constructor without these collaborators fail fast
+        instead of inventing stats.
+        """
+        if self._vector_store is None or self._embedder is None:
+            raise RagEngineError(
+                "corpus_stats() requires an engine wired with a VectorStore and "
+                "an Embedder. Build it via RagEngine.from_vertical_config()."
+            )
+        return self._vector_store.corpus_stats(
+            embedding_model=self._embedder.model_name
+        )

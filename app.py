@@ -563,6 +563,34 @@ html, body, .stApp,
 .st-key-citara-input-hint .input-hint{ display:flex; align-items:center; gap:14px;
   flex-wrap:wrap; margin-top:9px; font-size:11px; color:var(--faint); }
 .st-key-citara-input-hint .hint-mono{ font-family:var(--font-mono); }
+
+/* ---- Corpus panel (tokens from export/screens/06-corpus.html, loaded state) ---
+   3 stat columns, not the mock's 4: "última ingesta" is omitted on purpose —
+   ChromaDB keeps no reliable ingest timestamp, showing one would be invented
+   data. The model cell is the REAL embedding model from config, never the
+   mock's "nomic-embed-text". */
+.st-key-citara-corpus .stat-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+.st-key-citara-corpus .stat{ background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-md); padding:15px 16px; }
+.st-key-citara-corpus .stat-num{ font-family:var(--font-serif); font-weight:600;
+  font-size:26px; line-height:1; color:var(--text); }
+.st-key-citara-corpus .stat-model{ font-family:var(--font-mono); font-weight:500;
+  font-size:14px; line-height:1.2; word-break:break-all; color:var(--text);
+  /* align the mono model name with the serif numbers' baseline block */
+  padding-top:6px; }
+.st-key-citara-corpus .stat-lbl{ font-size:12px; color:var(--muted); margin-top:6px; }
+.st-key-citara-corpus .corpus-label{ margin:4px 0 3px; }
+.st-key-citara-corpus .file-rows{ display:flex; flex-direction:column; gap:8px; }
+.st-key-citara-corpus .file-row{ display:flex; align-items:center; gap:12px;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:11px 14px; font-family:var(--font-mono); font-size:13px; font-weight:500;
+  color:var(--text); }
+/* the mock's "Actualizar corpus" button is deliberately a COMMAND chip: st.code
+   with its native copy button — re-ingestion from the UI is SPEC §8 future work */
+.st-key-citara-corpus [data-testid="stCode"] pre{
+  background:var(--bg2) !important; border:1px solid var(--border); border-radius:9px;
+  font-family:var(--font-mono); font-size:12.5px; padding:9px 12px; }
+.st-key-citara-corpus [data-testid="stVerticalBlock"]{ gap:0.55rem; }
 </style>
 """
 
@@ -841,6 +869,53 @@ def _render_error_card(
                     st.rerun()
                 if st.button("Ver guía de instalación", key=f"citara-guide-{key_suffix}"):
                     _show_install_guide(llm_model, host)
+
+
+def _render_corpus_panel(engine: RagEngine, config: VerticalConfig) -> None:
+    """Read-only Corpus section (mock 06, loaded state) with REAL stats.
+
+    Presentation calls the engine façade only — never ChromaDB (golden rule 1).
+    The mock's "Actualizar corpus" button renders as a command chip because
+    re-ingestion from the UI is SPEC §8 future work: the honest control is the
+    real CLI command, copyable via st.code's native button. No last-ingested
+    stat (no reliable source) and the embedding model comes from config.
+    """
+    with st.expander("Corpus"):
+        try:
+            stats = engine.corpus_stats()
+        except RagEngineError as exc:
+            _render_error_card(**_error_presentation(exc, config), key_suffix="corpus")
+            return
+        chunks_fmt = f"{stats.chunk_count:,}".replace(",", " ")  # mock: "3 412"
+        rows = "".join(
+            f'<div class="file-row">{escape(document_id)}</div>'
+            for document_id in stats.document_ids
+        )
+        with st.container(key="citara-corpus"):
+            st.markdown(
+                '<div class="stat-grid">'
+                f'<div class="stat"><div class="stat-num">{stats.document_count}</div>'
+                '<div class="stat-lbl">Documentos</div></div>'
+                f'<div class="stat"><div class="stat-num">{chunks_fmt}</div>'
+                '<div class="stat-lbl">Fragmentos · vectores</div></div>'
+                f'<div class="stat"><div class="stat-model">{escape(stats.embedding_model)}</div>'
+                '<div class="stat-lbl">Modelo de embedding</div></div></div>',
+                unsafe_allow_html=True,
+            )
+            if rows:
+                st.markdown(
+                    '<div class="label corpus-label">Documentos ingestados</div>'
+                    f'<div class="file-rows">{rows}</div>',
+                    unsafe_allow_html=True,
+                )
+            st.markdown(
+                '<div class="label corpus-label">Actualizar corpus (desde terminal)</div>',
+                unsafe_allow_html=True,
+            )
+            st.code(
+                f"python -m core.ingest --vertical {config.vertical.value}",
+                language="bash",
+            )
 
 
 def _check_dependencies(engine: RagEngine, config: VerticalConfig) -> RagEngineError | None:
@@ -1353,6 +1428,10 @@ def main() -> None:
     preflight_error = _check_dependencies(engine, config)
     dependencies_ok = preflight_error is None
     _render_ollama_badge(badge_slot, config, preflight_error)
+
+    # Read-only Corpus section under the header — real counts through the
+    # engine façade; presentation never touches ChromaDB (golden rule 1).
+    _render_corpus_panel(engine, config)
 
     history = _history_for(vertical_value)
 

@@ -18,14 +18,21 @@ from core.store import QueryHit, VectorStore, flatten_metadata
 
 
 class _FakeCollection:
-    """Records upsert/query calls and replays a canned query response."""
+    """Records upsert/query calls and replays canned query/get responses."""
 
-    def __init__(self, count: int = 1, query_response: dict | None = None) -> None:
+    def __init__(
+        self,
+        count: int = 1,
+        query_response: dict | None = None,
+        metadatas: list[dict] | None = None,
+    ) -> None:
         self._count = count
         self._query_response = query_response or {}
+        self._metadatas = metadatas if metadatas is not None else []
         self.upsert_calls: list[dict] = []
         self.add_calls: list[dict] = []  # must stay empty: upsert, never add (AC1)
         self.query_calls: list[dict] = []
+        self.get_calls: list[dict] = []
 
     def upsert(self, **kwargs) -> None:
         self.upsert_calls.append(kwargs)
@@ -39,6 +46,10 @@ class _FakeCollection:
     def query(self, **kwargs) -> dict:
         self.query_calls.append(kwargs)
         return self._query_response
+
+    def get(self, **kwargs) -> dict:
+        self.get_calls.append(kwargs)
+        return {"metadatas": list(self._metadatas)}
 
 
 class _FakeClient:
@@ -240,3 +251,73 @@ def test_collection_name_is_passed_through_unchanged():
 
     # No vertical branching: the name flows straight to Chroma as given.
     assert client.requested_names == ["legal_chunks"]
+
+
+# --- CorpusStats: the read-only corpus snapshot contract (FR-#06) ------------
+
+
+def test_corpus_stats_counts_and_sorted_distinct_document_ids():
+    # 5 chunks over 3 documents, deliberately unsorted and with repeats.
+    metadatas = [
+        {"document_id": "ley-b", "page": 1},
+        {"document_id": "ley-a", "page": 2},
+        {"document_id": "ley-b", "page": 3},
+        {"document_id": "ley-c", "page": 1},
+        {"document_id": "ley-a", "page": 5},
+    ]
+    store = _make_store(_FakeCollection(count=5, metadatas=metadatas))
+
+    stats = store.corpus_stats(embedding_model="bge-m3")
+
+    assert stats.chunk_count == 5
+    assert stats.document_count == 3
+    # sorted() is part of the contract: Chroma's get() guarantees no order, and
+    # an unsorted list would shuffle between UI reruns.
+    assert stats.document_ids == ["ley-a", "ley-b", "ley-c"]
+    # The model name is pass-through DATA from config — never hardcoded here.
+    assert stats.embedding_model == "bge-m3"
+
+
+def test_corpus_stats_empty_collection_is_zeros_not_error():
+    store = _make_store(_FakeCollection(count=0, metadatas=[]))
+
+    stats = store.corpus_stats(embedding_model="bge-m3")
+
+    assert stats.chunk_count == 0
+    assert stats.document_count == 0
+    assert stats.document_ids == []
+
+
+def test_corpus_stats_is_read_only():
+    collection = _FakeCollection(count=2, metadatas=[{"document_id": "d", "page": 1}])
+    store = _make_store(collection)
+
+    store.corpus_stats(embedding_model="bge-m3")
+
+    # Zero mutation: stats must never write into the Collection.
+    assert collection.upsert_calls == []
+    assert collection.add_calls == []
+
+
+def test_corpus_stats_chroma_failure_is_actionable():
+    class _BoomCollection(_FakeCollection):
+        def count(self):
+            raise RuntimeError("locked")
+
+    store = _make_store(_BoomCollection())
+
+    with pytest.raises(RetrievalError):
+        store.corpus_stats(embedding_model="bge-m3")
+
+
+def test_corpus_stats_value_object_is_frozen():
+    from pydantic import ValidationError
+
+    from core.models import CorpusStats
+
+    stats = CorpusStats(
+        document_count=1, chunk_count=2, embedding_model="bge-m3", document_ids=["d"]
+    )
+
+    with pytest.raises(ValidationError):
+        stats.chunk_count = 99

@@ -258,3 +258,55 @@ def test_answer_stream_empty_context_abstains_with_no_citations():
     # and no LLM fragments used.
     assert list(streamed.text_stream) == [_ABSTENTION_TEXT]
     assert streamed.citations == []
+
+
+# --- corpus_stats façade (FR-#06): delegates, never counts ---------------------
+
+
+def test_corpus_stats_requires_wired_store_and_embedder():
+    from core.models import RagEngineError
+
+    engine = RagEngine(
+        retriever=_FakeRetriever([]),
+        generator=_FakeGenerator(_answer_with_citation()),
+        top_k=5,
+        # plain test constructor: no VectorStore, no Embedder
+    )
+
+    # Fail fast with the actionable wiring hint — never invent stats.
+    with pytest.raises(RagEngineError) as exc:
+        engine.corpus_stats()
+    assert "from_vertical_config" in str(exc.value)
+
+
+def test_corpus_stats_delegates_with_the_configured_embedding_model():
+    from core.models import CorpusStats
+
+    class _FakeStore:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def corpus_stats(self, embedding_model: str) -> CorpusStats:
+            self.calls.append(embedding_model)
+            return CorpusStats(
+                document_count=0, chunk_count=0,
+                embedding_model=embedding_model, document_ids=[],
+            )
+
+    class _NamedEmbedder(_FakeEmbedder):
+        model_name = "bge-m3"
+
+    store = _FakeStore()
+    engine = RagEngine(
+        retriever=_FakeRetriever([]),
+        generator=_FakeGenerator(_answer_with_citation()),
+        top_k=5,
+        embedder=_NamedEmbedder(),
+        vector_store=store,
+    )
+
+    stats = engine.corpus_stats()
+
+    # Golden rule 4: the model name flows from the ONE Embedder source.
+    assert store.calls == ["bge-m3"]
+    assert stats.embedding_model == "bge-m3"
