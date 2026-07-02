@@ -56,6 +56,7 @@
 | **VerticalConfig** | The declarative description of a Vertical: `corpus_path`, `collection_name`, `system_prompt`, display name/branding. Lives in `config/<vertical>.yaml`. The ONLY thing that changes between verticals. | `VerticalConfig` |
 | **SystemPrompt** | The instruction block given to the LLM that enforces Grounding, Abstention, citation format, and Spanish output. Vertical-specific (legal vs clinical tone) but same *rules*. | `system_prompt` |
 | **App** | The Streamlit presentation layer. Reads a `VerticalConfig`, instantiates a `RagEngine`, renders the chat + sources panel. Contains no domain logic. | `app.py` |
+| **example_questions** | Optional per-Vertical list of suggested Queries the App offers on the empty chat state. Pure `VerticalConfig` data — clicking one submits it through the exact same path as a typed Query. | `example_questions: list[str]` |
 | **SourcesPanel** | The UI element listing the `Citation`s behind the current `Answer`. | — |
 
 ---

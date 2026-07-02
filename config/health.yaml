@@ -11,6 +11,16 @@ collection_name: "health_gpc"
 # Query-time only — no re-ingest needed.
 top_k: 6
 
+# Suggested questions for the App's empty chat state (presentation data only).
+# PROPOSED from the ingested corpus — each targets one concrete SourceDocument
+# (hipertension, diabetes-tipo-2, epoc, ictus); the hipertension one is already
+# smoke-tested; validate the rest against the live corpus before shipping.
+example_questions:
+  - "¿Cómo se diagnostica la hipertensión arterial?"
+  - "¿Qué valores de glucemia se utilizan para diagnosticar la diabetes tipo 2?"
+  - "¿Qué papel tiene la espirometría en el diagnóstico de la EPOC?"
+  - "¿Cuáles son los principales factores de riesgo del ictus?"
+
 # SystemPrompt: enforces Grounding, Abstention, citation format, Spanish output.
 # Rules are identical across verticals; only tone/domain framing differs.
 system_prompt: |

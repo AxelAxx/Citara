@@ -291,6 +291,48 @@ html, body, .stApp,
 .cmd .sym{ font-family:var(--font-mono); font-size:12px; color:var(--warn); }
 /* undo Streamlit's markdown <code> chrome (pink text, tinted bg) inside the chip */
 .cmd code{ font-family:var(--font-mono); font-size:12.5px; color:var(--text); background:none; padding:0; }
+
+/* ---- Empty chat state (ported from export/screens/03-chat-empty.html) ---------
+   Shown only while the active Vertical's history is empty. The suggestions are
+   real st.button widgets restyled as the design's .suggest rows; the keyed
+   container (st-key-citara-empty) scopes every rule so no other button changes. */
+.st-key-citara-empty{ text-align:center; padding:34px 0 8px; }
+.st-key-citara-empty .empty-logo{ position:relative; width:84px; height:84px; margin:0 auto 18px;
+  border-radius:26%; background:var(--accent-tint); border:1px solid var(--accent-line);
+  display:flex; align-items:center; justify-content:center; }
+/* C¹ mark at 84px — same pseudo-element monogram as the chat avatar, scaled with
+   the design's em math (C = .56em ⇒ 47px; the ¹ at .30em ⇒ 14px). */
+.st-key-citara-empty .empty-logo::before{ content:'C'; font-family:var(--font-serif); font-weight:600;
+  font-size:47px; line-height:1; letter-spacing:-.02em; color:var(--text); }
+.st-key-citara-empty .empty-logo::after{ content:'1'; position:absolute; top:17px; left:56px;
+  font-family:var(--font-mono); font-weight:600; font-size:14px; color:var(--accent); line-height:1; }
+/* text-align set per element: Streamlit's markdown container applies its own
+   alignment, so the container-level center does not inherit into these. */
+.st-key-citara-empty .empty-title{ font-family:var(--font-serif); font-weight:600; font-size:24px;
+  color:var(--text); margin:0 0 8px; text-align:center; }
+.st-key-citara-empty .empty-sub{ margin:0 auto 28px; max-width:440px; font-size:14.5px;
+  color:var(--muted); line-height:1.55; text-align:center; }
+.st-key-citara-empty .empty-label{ margin-bottom:12px; text-align:center; }
+.st-key-citara-empty [data-testid="stButton"]{ max-width:520px; margin:0 auto; }
+.st-key-citara-empty [data-testid="stButton"] > button{
+  justify-content:flex-start; text-align:left; gap:11px; padding:13px 15px; border-radius:12px;
+  background:var(--surface); border:1px solid var(--border); color:var(--text); min-height:0;
+}
+/* single-line labels would otherwise center inside the button: Streamlit wraps the
+   label in a flex div with justify-content:center that fills the leftover width */
+.st-key-citara-empty [data-testid="stButton"] > button > div{ justify-content:flex-start; }
+.st-key-citara-empty [data-testid="stButton"] > button [data-testid="stMarkdownContainer"]{
+  text-align:left;
+}
+.st-key-citara-empty [data-testid="stButton"] > button p{ font-size:14px; }
+.st-key-citara-empty [data-testid="stButton"] > button::before{
+  content:'›'; color:var(--accent); font-family:var(--font-mono); font-size:14px;
+}
+.st-key-citara-empty [data-testid="stButton"] > button:hover,
+.st-key-citara-empty [data-testid="stButton"] > button:focus-visible,
+.st-key-citara-empty [data-testid="stButton"] > button:active{
+  border-color:var(--accent-line); background:var(--surface2); color:var(--text);
+}
 </style>
 """
 
@@ -608,6 +650,47 @@ def _render_history(history: list[dict]) -> None:
                 _render_sources_panel(answer)
 
 
+def _queue_query(question: str) -> None:
+    """on_click of an example-question button: queue it for the next rerun.
+
+    The queued value is consumed at the top of main's render cycle and fed
+    through the exact same path as a typed ``st.chat_input`` prompt — one
+    handler for both entry points, no duplicated query flow.
+    """
+    st.session_state["pending_query"] = question
+
+
+def _render_empty_state(config: VerticalConfig) -> None:
+    """The welcome / empty chat state: C¹ monogram, greeting, example questions.
+
+    The example questions are ``VerticalConfig`` data (golden rule 2: nothing
+    vertical-specific hardcoded in presentation); a Vertical without them still
+    gets the greeting, just with no suggestion list.
+    """
+    with st.container(key="citara-empty"):
+        st.markdown(
+            '<div class="empty-logo"></div>'
+            '<div class="empty-title">Hola, soy Citara</div>'
+            '<p class="empty-sub">Respondo en español basándome solo en los documentos '
+            "cargados, y cito la fuente exacta de cada afirmación.</p>",
+            unsafe_allow_html=True,
+        )
+        if not config.example_questions:
+            return
+        st.markdown(
+            '<div class="label empty-label">Prueba a preguntar</div>',
+            unsafe_allow_html=True,
+        )
+        for index, question in enumerate(config.example_questions):
+            st.button(
+                question,
+                key=f"citara-suggest-{index}",
+                width="stretch",
+                on_click=_queue_query,
+                args=(question,),
+            )
+
+
 def _spinner_until_first_token(text_stream: Iterator[str]) -> Iterator[str]:
     """Pull the first fragment eagerly, then re-emit it followed by the rest.
 
@@ -703,72 +786,94 @@ def main() -> None:
     dependencies_ok = _check_dependencies(engine)
 
     history = _history_for(vertical_value)
-    _render_history(history)
 
-    prompt = st.chat_input("Escribe tu pregunta…")
-    if not prompt:
-        return
+    def handle_query(prompt: str) -> None:
+        """The single query path, shared by st.chat_input and the example buttons.
 
-    if not dependencies_ok:
-        # Dependencies are down; the error is already on screen. Don't attempt a
-        # query that would only fail deeper in.
-        st.warning("Resuelve el problema indicado arriba antes de preguntar.")
-        return
-
-    # Show the user's question immediately, before any generation, so the slow LLM
-    # (1–2 min on local hardware) never makes the app look hung waiting on a spinner.
-    history.append({"role": "user", "text": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # First question of the session? If warm-up didn't fully hide the cold start,
-    # show an honest heads-up. Simple per-session flag — no elaborate detection.
-    first_query = not st.session_state.get("has_generated", False)
-    spinner_text = _FIRST_SPINNER_TEXT if first_query else _SPINNER_TEXT
-
-    with st.chat_message("assistant"):
-        try:
-            # Consume the engine's PUBLIC streaming seam — the UI knows nothing about
-            # the Retriever/Generator inside. answer_stream() runs retrieval eagerly
-            # and returns the still-lazy text generator plus the citations derived from
-            # the retrieved context. The spinner covers retrieval AND the wait for the
-            # first token (where a cold model would load), then write_stream renders
-            # the tokens as they arrive.
-            with st.spinner(spinner_text):
-                streamed = engine.answer_stream(prompt)
-                primed = _spinner_until_first_token(streamed.text_stream)
-            # Reserve a slot ABOVE the streamed text: a prose abstention is only
-            # recognizable once the full text has arrived, but the design places
-            # the abstention pill before the answer body.
-            label_slot = st.empty()
-            full_text = st.write_stream(primed)
-            st.session_state["has_generated"] = True
-        except RagEngineError as exc:
-            # Retrieval/generation failures (empty Collection, Ollama dropped, model
-            # not pulled) all carry actionable messages — Ollama-down raises on the
-            # first streamed fragment, before any text is shown. Surface them as the
-            # design's error card, keep the app alive.
-            presentation = _error_presentation(exc)
-            _render_error_card(**presentation)
-            history.append(
-                {"role": "assistant", "text": str(exc), "answer": None, "error": presentation}
-            )
+        Nested on purpose: it closes over this run's engine/history/preflight
+        instead of threading them through parameters or session state.
+        """
+        if not dependencies_ok:
+            # Dependencies are down; the error is already on screen. Don't attempt
+            # a query that would only fail deeper in.
+            st.warning("Resuelve el problema indicado arriba antes de preguntar.")
             return
 
-        # Rebuild the Answer for the SourcesPanel + history. Abstention ⇔ no
-        # citations (empty context, deterministic guard) OR the text opens with the
-        # abstention sentence (the LLM declined despite retrieved context) — in
-        # both cases showing sources under "I can't find this" would contradict
-        # the answer, so the Answer drops them.
-        if not streamed.citations or _is_abstention_text(full_text):
-            answer = Answer.abstention(full_text or _ABSTENTION_TEXT)
-            with label_slot.container():
-                _render_abstention_label()
-        else:
-            answer = Answer(text=full_text, citations=streamed.citations)
-        _render_sources_panel(answer)
+        # Show the user's question immediately, before any generation, so the slow
+        # LLM (1–2 min on local hardware) never makes the app look hung waiting on
+        # a spinner.
+        history.append({"role": "user", "text": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    history.append({"role": "assistant", "text": answer.text, "answer": answer})
+        # First question of the session? If warm-up didn't fully hide the cold
+        # start, show an honest heads-up. Simple per-session flag.
+        first_query = not st.session_state.get("has_generated", False)
+        spinner_text = _FIRST_SPINNER_TEXT if first_query else _SPINNER_TEXT
+
+        with st.chat_message("assistant"):
+            try:
+                # Consume the engine's PUBLIC streaming seam — the UI knows nothing
+                # about the Retriever/Generator inside. answer_stream() runs
+                # retrieval eagerly and returns the still-lazy text generator plus
+                # the citations derived from the retrieved context. The spinner
+                # covers retrieval AND the wait for the first token (where a cold
+                # model would load), then write_stream renders the tokens as they
+                # arrive.
+                with st.spinner(spinner_text):
+                    streamed = engine.answer_stream(prompt)
+                    primed = _spinner_until_first_token(streamed.text_stream)
+                # Reserve a slot ABOVE the streamed text: a prose abstention is
+                # only recognizable once the full text has arrived, but the design
+                # places the abstention pill before the answer body.
+                label_slot = st.empty()
+                full_text = st.write_stream(primed)
+                st.session_state["has_generated"] = True
+            except RagEngineError as exc:
+                # Retrieval/generation failures (empty Collection, Ollama dropped,
+                # model not pulled) all carry actionable messages — Ollama-down
+                # raises on the first streamed fragment, before any text is shown.
+                # Surface them as the design's error card, keep the app alive.
+                presentation = _error_presentation(exc)
+                _render_error_card(**presentation)
+                history.append(
+                    {"role": "assistant", "text": str(exc), "answer": None, "error": presentation}
+                )
+                return
+
+            # Rebuild the Answer for the SourcesPanel + history. Abstention ⇔ no
+            # citations (empty context, deterministic guard) OR the text opens with
+            # the abstention sentence (the LLM declined despite retrieved context)
+            # — in both cases showing sources under "I can't find this" would
+            # contradict the answer, so the Answer drops them.
+            if not streamed.citations or _is_abstention_text(full_text):
+                answer = Answer.abstention(full_text or _ABSTENTION_TEXT)
+                with label_slot.container():
+                    _render_abstention_label()
+            else:
+                answer = Answer(text=full_text, citations=streamed.citations)
+            _render_sources_panel(answer)
+
+        history.append({"role": "assistant", "text": answer.text, "answer": answer})
+
+    # A queued example-question click (see _render_empty_state) is consumed at the
+    # top of the render cycle, before anything is painted, so its rerun flows
+    # through the exact same path as a typed prompt.
+    pending_query = st.session_state.pop("pending_query", None)
+
+    # st.chat_input is read BEFORE the empty state on purpose: its value decides
+    # whether the welcome renders, and the widget pins itself to the bottom of the
+    # page regardless of call order.
+    prompt = st.chat_input("Escribe tu pregunta…") or pending_query
+
+    if not history and not prompt:
+        _render_empty_state(config)
+
+    _render_history(history)
+
+    if not prompt:
+        return
+    handle_query(prompt)
 
 
 main()

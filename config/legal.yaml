@@ -10,6 +10,16 @@ collection_name: "legal_boe"
 # answers. Query-time only — no re-ingest needed.
 top_k: 6
 
+# Suggested questions for the App's empty chat state (presentation data only).
+# PROPOSED from the ingested corpus — each targets one concrete SourceDocument
+# (estatuto-trabajadores, ley-arrendamientos, constitucion, ley-39-2015); validate
+# against the live corpus in a smoke test before shipping.
+example_questions:
+  - "¿Cuántos días de vacaciones anuales me corresponden según el Estatuto de los Trabajadores?"
+  - "¿Cuál es la duración mínima de un contrato de alquiler de vivienda?"
+  - "¿A qué edad se alcanza la mayoría de edad según la Constitución?"
+  - "¿Qué plazo tiene la Administración para resolver un procedimiento administrativo?"
+
 # SystemPrompt: enforces Grounding, Abstention, citation format, Spanish output.
 # Rules are identical across verticals; only tone/domain framing differs (here:
 # juridical tone, referring to "documentos legales / normativa" instead of

@@ -20,7 +20,7 @@ from __future__ import annotations
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # An Embedding is a dense vector. Aliased so domain boundaries read in the
 # ubiquitous language instead of a bare ``list[float]``.
@@ -177,6 +177,10 @@ class VerticalConfig(BaseModel):
     chunk_overlap: int = 90
     top_k: int = 5
     ollama_base_url: str = "http://localhost:11434"
+    # Presentation data consumed by the App's empty chat state (suggested Queries,
+    # in Spanish — corpus-facing data, not code). Optional on purpose: a Vertical
+    # without them is fully functional and simply shows no suggestions.
+    example_questions: list[str] = Field(default_factory=list)
 
 
 # --- Domain exceptions -------------------------------------------------------
