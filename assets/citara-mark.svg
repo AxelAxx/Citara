@@ -1,0 +1,5 @@
+<svg viewBox="0 0 240 240" width="240" height="240" xmlns="http://www.w3.org/2000/svg">
+  <rect x="8" y="8" width="224" height="224" rx="60" fill="#7C9CFF"></rect>
+  <text x="112" y="120" text-anchor="middle" dominant-baseline="central" font-family="&#39;IBM Plex Serif&#39;, Georgia, &#39;Times New Roman&#39;, serif" font-weight="600" font-size="150" letter-spacing="-3" fill="#0C0D10">C</text>
+  <text x="182" y="78" text-anchor="middle" dominant-baseline="central" font-family="&#39;IBM Plex Mono&#39;, ui-monospace, monospace" font-weight="600" font-size="52" fill="#0C0D10">1</text>
+</svg>

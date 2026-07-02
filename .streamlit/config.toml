@@ -1,0 +1,24 @@
+# ============================================================
+# CITARA · Tema de Streamlit
+# ============================================================
+# Streamlit aplica UN color primario (estático por arranque). Por defecto = acento
+# LEGAL (#7C9CFF). El cambio de acento por vertical en vivo NO se hace aquí, sino
+# vía la variable CSS --accent inyectada en app.py (Streamlit no relee este archivo
+# por rerun). IBM Plex no es nativa: se carga con CSS (@import en app.py).
+
+[theme]
+base = "dark"
+primaryColor = "#7C9CFF"              # Legal · Salud = "#46CFA6"
+backgroundColor = "#101115"           # fondo de la app
+secondaryBackgroundColor = "#16181E"  # sidebar / tarjetas
+textColor = "#ECEEF2"
+font = "serif"
+
+# ---- Variante TEMA CLARO (descomenta y sustituye el bloque de arriba) ----
+# [theme]
+# base = "light"
+# primaryColor = "#2F52C9"            # Legal · Salud = "#0E8A6B"
+# backgroundColor = "#F5F3EE"
+# secondaryBackgroundColor = "#FFFFFF"
+# textColor = "#1A1915"
+# font = "serif"

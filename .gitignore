@@ -39,6 +39,14 @@ data/**/*.xml
 # --- Tiktoken / model caches (if redirected into the project) ---
 .tiktoken_cache/
 
+# --- Design scaffolding (reference only, not the product) ---
+# The export/ folder is design hand-off material (Claude Design mockups, CSS,
+# screenshots), not shippable code. Anchored to the repo root so ONLY this folder
+# is ignored. Two files from inside it WILL be committed later, in their own final
+# locations (which this rule does NOT match): config.toml → .streamlit/config.toml,
+# and citara-mark.svg → assets/citara-mark.svg.
+/export/
+
 # --- Claude Code (commit shared config, ignore local-only settings) ---
 .claude/settings.local.json
 
