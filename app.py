@@ -1597,9 +1597,14 @@ def main() -> None:
                 # raises on the first streamed fragment, before any text is shown.
                 # Surface them as the design's error card, keep the app alive.
                 presentation = _error_presentation(exc, config)
-                # "live-" prefix: this run's history was replayed with
-                # "history-N" suffixes, so the in-flight card can never collide.
-                _render_error_card(**presentation, key_suffix=f"live-{len(history)}")
+                # The suffix must be STABLE across the live→history transition
+                # (same fix as the SourcesPanel): a button click triggers a
+                # rerun where this card re-renders from history — with a "live-"
+                # key the clicked widget would not exist in the new run and the
+                # first "Ver guía" click would be silently dropped (retry only
+                # survived because its action IS the rerun). This failed turn is
+                # appended right below, so its history index IS len(history).
+                _render_error_card(**presentation, key_suffix=f"history-{len(history)}")
                 history.append(
                     {"role": "assistant", "text": str(exc), "answer": None, "error": presentation}
                 )
