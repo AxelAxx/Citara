@@ -33,6 +33,7 @@ from core.generate import _ABSTENTION_TEXT
 from core.ingest import _load_vertical_config
 from core.models import (
     Answer,
+    CorpusStats,
     EmptyCorpusError,
     ModelNotPulledError,
     OllamaUnreachableError,
@@ -532,6 +533,9 @@ html, body, .stApp,
 .st-key-citara-sidebar .side-badge-local{ font-family:var(--font-mono); font-size:11px; color:var(--faint);
   border-top:1px solid var(--border); padding-top:8px; }
 .st-key-citara-sidebar .side-section-label{ padding:0 4px; }
+/* .domain-meta token under the switcher: the active Vertical's real doc count */
+.st-key-citara-sidebar .side-domain-meta{ font-family:var(--font-mono); font-size:10.5px;
+  color:var(--faint); padding:0 4px; }
 .st-key-citara-sidebar .side-foot{ padding:14px 4px 0; border-top:1px solid var(--border);
   font-size:11px; color:var(--faint); line-height:1.5; }
 /* pin the foot-note to the sidebar bottom (.foot-note's margin-top:auto): the
@@ -740,6 +744,31 @@ def _load_engine(vertical_value: str) -> RagEngine:
     except RagEngineError:
         pass
     return engine
+
+
+@st.cache_data(show_spinner=False)
+def _corpus_stats_for(vertical_value: str) -> CorpusStats:
+    """Cached Corpus snapshot per Vertical — the ONE route welcome AND sidebar use.
+
+    Goes through the LIGHT engine façade (VectorStore only): the welcome needs
+    counts for BOTH Verticals, and building full engines there would trigger the
+    LLM warm-up (~6s each) before the user even picked one. cache_data, not
+    resource: a small immutable value object; the Corpus only changes via the
+    offline ingest CLI, so reruns can reuse it (the same staleness trade-off
+    _load_engine already accepts).
+    """
+    return RagEngine.corpus_stats_for(_load_vertical_config(Vertical(vertical_value)))
+
+
+def _document_count_label(config: VerticalConfig, stats: CorpusStats) -> str:
+    """"{domain_sublabel} · {n} documento(s)" — the ONE format welcome and sidebar share.
+
+    The count is the REAL one from CorpusStats (the mock's "14 documentos" was a
+    placeholder); an empty sublabel degrades to the bare count (fail-safe).
+    """
+    noun = "documento" if stats.document_count == 1 else "documentos"
+    count = f"{stats.document_count} {noun}"
+    return f"{config.domain_sublabel} · {count}" if config.domain_sublabel else count
 
 
 # --- error translation (NFR6/AC7) --------------------------------------------
@@ -1183,11 +1212,13 @@ def _render_welcome(options: list[tuple[str, str]]) -> None:
             card_title = config.domain_name or display_name
             card_css.append(
                 # Chip letter is config DATA (domain_letter, not value[0] —
-                # health's chip is "S", not "H"); sub-label has no counts.
+                # health's chip is "S", not "H"). The sub-label carries the REAL
+                # document count via the light corpus_stats_for façade (cached;
+                # no LLM warm-up on the welcome).
                 f".st-key-citara-welcome .st-key-citara-domain-{value} button::before"
                 f"{{content:'{config.domain_letter}';}}"
                 f".st-key-citara-welcome .st-key-citara-domain-{value} button::after"
-                f"{{content:'{config.domain_sublabel}';}}"
+                f"{{content:'{_document_count_label(config, _corpus_stats_for(value))}';}}"
                 f".st-key-citara-welcome .st-key-citara-domain-{value} button:hover"
                 f"{{border-color:{accent['line']};}}"
             )
@@ -1371,6 +1402,15 @@ def main() -> None:
             # the mock's .section-label above replaces the widget's visible
             # label; the label itself stays for accessibility
             label_visibility="collapsed",
+        )
+        # Real document count for the ACTIVE Vertical — same cached route and
+        # same format as the welcome cards, so the two can never diverge.
+        active_config = _load_vertical_config(Vertical(vertical_value))
+        st.markdown(
+            '<div class="side-domain-meta">'
+            f"{escape(_document_count_label(active_config, _corpus_stats_for(vertical_value)))}"
+            "</div>",
+            unsafe_allow_html=True,
         )
         st.markdown(
             '<div class="side-foot">Todo el procesamiento ocurre en tu equipo.</div>',

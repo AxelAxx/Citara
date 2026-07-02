@@ -219,3 +219,17 @@ class RagEngine:
         return self._vector_store.corpus_stats(
             embedding_model=self._embedder.model_name
         )
+
+    @classmethod
+    def corpus_stats_for(cls, config: VerticalConfig) -> CorpusStats:
+        """Corpus snapshot WITHOUT building the full engine — no Generator, no warm-up.
+
+        For callers that need counts for Verticals that are NOT active (e.g. the
+        welcome's domain cards, one per Vertical): only the Vertical's VectorStore
+        is built — on the same default persist path as ``from_vertical_config``,
+        so both roads read the same persistence — and the model name comes from
+        the same config field the Embedder is built from (golden rule 4).
+        Delegates to :meth:`VectorStore.corpus_stats`: one logic site (DRY).
+        """
+        store = VectorStore(collection_name=config.collection_name)
+        return store.corpus_stats(embedding_model=config.embedding_model)

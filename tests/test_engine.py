@@ -310,3 +310,32 @@ def test_corpus_stats_delegates_with_the_configured_embedding_model():
     # Golden rule 4: the model name flows from the ONE Embedder source.
     assert store.calls == ["bge-m3"]
     assert stats.embedding_model == "bge-m3"
+
+
+def test_corpus_stats_for_builds_only_the_vector_store(monkeypatch):
+    """The light façade: only a VectorStore, config-sourced model, no Generator."""
+    from core import engine as engine_module
+    from core.models import CorpusStats
+
+    built: dict = {}
+
+    class _RecordingStore:
+        def __init__(self, collection_name: str) -> None:
+            built["collection_name"] = collection_name
+
+        def corpus_stats(self, embedding_model: str) -> CorpusStats:
+            built["embedding_model"] = embedding_model
+            return CorpusStats(
+                document_count=0, chunk_count=0,
+                embedding_model=embedding_model, document_ids=[],
+            )
+
+    monkeypatch.setattr(engine_module, "VectorStore", _RecordingStore)
+    config = _config(Vertical.HEALTH, "health_gpc", "prompt")
+
+    stats = RagEngine.corpus_stats_for(config)
+
+    # collection + model flow from the ONE config (golden rule 4); nothing else
+    # is constructed — no Generator, no Embedder, no warm-up.
+    assert built == {"collection_name": "health_gpc", "embedding_model": "bge-m3"}
+    assert stats.document_count == 0
