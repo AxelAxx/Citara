@@ -152,6 +152,9 @@ Vertical `legal` (BOE) ya integrada (G1 demostrable). Foco actual: pulido de UX
 - **source fragment viewer (#09-lite)**: shows raw extraction artifacts (markdown
   headers, `<sup>` tags); clean for display in #09-full or at ingest, not the lite
   viewer.
+- **ui/theme.py (splash guard)**: `st.components.v1.html` retires after 2026-06-01
+  → migrate to `st.iframe`. Surfaces in theme.py; address at V2 step 3 or a
+  standalone fix.
 
 ---
 
