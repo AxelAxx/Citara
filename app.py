@@ -20,17 +20,10 @@ from html import escape
 import streamlit as st
 
 from core.engine import RagEngine
-
-# Reading the VerticalConfig for UI branding (display_name) is a presentation
-# concern, not domain logic. We reuse ingest.py's minimal loader so config is read
-# in one place; TODO(module 9): a dedicated config module will own this.
 from core.generate import _ABSTENTION_TEXT
-from core.ingest import load_vertical_config
 from core.models import (
     Answer,
-    CorpusStats,
     RagEngineError,
-    Vertical,
     VerticalConfig,
 )
 
@@ -50,6 +43,17 @@ from ui.components.sources_panel import (
     render_abstention_label,
     render_sources_panel,
 )
+from ui.screens.corpus import render_corpus_panel
+
+# welcome's options producer and cached corpus-stat helpers stay welcome-private:
+# main borrows them only until the sidebar/routing move in V2 steps 5-6
+# (provisional cross-module private imports, same criterion as above).
+from ui.screens.welcome import (
+    _corpus_stats_for,
+    _document_count_label,
+    _vertical_options,
+    render_welcome,
+)
 from ui.state import (
     KEY_ENTERED,
     KEY_HAS_GENERATED,
@@ -57,33 +61,14 @@ from ui.state import (
     KEY_VERTICAL,
     KEY_VERTICAL_WIDGET,
     config_for,
-    enter_chat,
     history_for,
     queue_query,
-    select_vertical,
     sync_vertical,
 )
-from ui.theme import LOGO_PATH, accent_for, inject_theme, render_splash
+from ui.theme import LOGO_PATH, inject_theme, render_splash
 
 
 # --- cached construction -----------------------------------------------------
-
-
-@st.cache_data(show_spinner=False)
-def _vertical_options() -> list[tuple[str, str]]:
-    """The selectable Verticals as (value, display_name), skipping any unconfigured.
-
-    Cached as data because it is just a cheap read of small YAML files; building the
-    option list once per session is enough.
-    """
-    options: list[tuple[str, str]] = []
-    for vertical in Vertical:
-        try:
-            config = load_vertical_config(vertical)
-        except RagEngineError:
-            continue  # a Vertical with no/invalid YAML simply isn't offered
-        options.append((vertical.value, config.display_name))
-    return options
 
 
 @st.cache_resource(show_spinner=False)
@@ -110,78 +95,6 @@ def _load_engine(vertical_value: str) -> RagEngine:
     except RagEngineError:
         pass
     return engine
-
-
-@st.cache_data(show_spinner=False)
-def _corpus_stats_for(vertical_value: str) -> CorpusStats:
-    """Cached Corpus snapshot per Vertical — the ONE route welcome AND sidebar use.
-
-    Goes through the LIGHT engine façade (VectorStore only): the welcome needs
-    counts for BOTH Verticals, and building full engines there would trigger the
-    LLM warm-up (~6s each) before the user even picked one. cache_data, not
-    resource: a small immutable value object; the Corpus only changes via the
-    offline ingest CLI, so reruns can reuse it (the same staleness trade-off
-    _load_engine already accepts).
-    """
-    return RagEngine.corpus_stats_for(config_for(vertical_value))
-
-
-def _document_count_label(config: VerticalConfig, stats: CorpusStats) -> str:
-    """"{domain_sublabel} · {n} documento(s)" — the ONE format welcome and sidebar share.
-
-    The count is the REAL one from CorpusStats (the mock's "14 documentos" was a
-    placeholder); an empty sublabel degrades to the bare count (fail-safe).
-    """
-    noun = "documento" if stats.document_count == 1 else "documentos"
-    count = f"{stats.document_count} {noun}"
-    return f"{config.domain_sublabel} · {count}" if config.domain_sublabel else count
-
-
-def _render_corpus_panel(engine: RagEngine, config: VerticalConfig) -> None:
-    """Read-only Corpus section (mock 06, loaded state) with REAL stats.
-
-    Presentation calls the engine façade only — never ChromaDB (golden rule 1).
-    The mock's "Actualizar corpus" button renders as a command chip because
-    re-ingestion from the UI is SPEC §8 future work: the honest control is the
-    real CLI command, copyable via st.code's native button. No last-ingested
-    stat (no reliable source) and the embedding model comes from config.
-    """
-    with st.expander("Corpus"):
-        try:
-            stats = engine.corpus_stats()
-        except RagEngineError as exc:
-            render_error_card(**_error_presentation(exc, config), key_suffix="corpus")
-            return
-        chunks_fmt = f"{stats.chunk_count:,}".replace(",", " ")  # mock: "3 412"
-        rows = "".join(
-            f'<div class="file-row">{escape(document_id)}</div>'
-            for document_id in stats.document_ids
-        )
-        with st.container(key="citara-corpus"):
-            st.markdown(
-                '<div class="stat-grid">'
-                f'<div class="stat"><div class="stat-num">{stats.document_count}</div>'
-                '<div class="stat-lbl">Documentos</div></div>'
-                f'<div class="stat"><div class="stat-num">{chunks_fmt}</div>'
-                '<div class="stat-lbl">Fragmentos · vectores</div></div>'
-                f'<div class="stat"><div class="stat-model">{escape(stats.embedding_model)}</div>'
-                '<div class="stat-lbl">Modelo de embedding</div></div></div>',
-                unsafe_allow_html=True,
-            )
-            if rows:
-                st.markdown(
-                    '<div class="label corpus-label">Documentos ingestados</div>'
-                    f'<div class="file-rows">{rows}</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown(
-                '<div class="label corpus-label">Actualizar corpus (desde terminal)</div>',
-                unsafe_allow_html=True,
-            )
-            st.code(
-                f"python -m core.ingest --vertical {config.vertical.value}",
-                language="bash",
-            )
 
 
 def _check_dependencies(engine: RagEngine, config: VerticalConfig) -> RagEngineError | None:
@@ -255,101 +168,6 @@ def _render_empty_state(config: VerticalConfig) -> None:
             )
 
 
-def _render_welcome(options: list[tuple[str, str]]) -> None:
-    """The entry screen: brand, headline, one selectable card per Vertical, CTA.
-
-    Two-step model: a card SELECTS its Vertical; only "Comenzar" ENTERS the
-    chat. Everything on a card is DERIVED, never hardcoded per vertical (golden
-    rule 2): title from domain_name (display_name when unset), chip letter from
-    domain_letter, sub-label from domain_sublabel — all VerticalConfig — and the
-    accent from accent_for. Chip and sub-label are pseudo-elements fed
-    by the data-driven <style> block below, because st.button labels cannot
-    nest styled children.
-    """
-    # A selection must exist before any click so one card renders active and
-    # "Comenzar" has a target: default to the first configured Vertical.
-    st.session_state.setdefault(KEY_VERTICAL, options[0][0])
-    selected = st.session_state[KEY_VERTICAL]
-    with st.container(key="citara-welcome"):
-        st.markdown(
-            '<div class="welcome-badge"><span class="dot dot-ok"></span>'
-            "<span>100% local · sin nube</span></div>"
-            '<div class="welcome-logo"></div>'
-            '<div class="welcome-name">Citara</div>'
-            '<h1 class="welcome-title">Pregunta a tus<br>documentos.</h1>'
-            '<p class="welcome-subtitle">Citara responde en español basándose '
-            "<strong>solo</strong> en tus documentos, y cita la fuente exacta de "
-            "cada afirmación. Todo el procesamiento ocurre en tu equipo.</p>"
-            '<div class="label welcome-label">Elige un dominio para empezar</div>',
-            unsafe_allow_html=True,
-        )
-        card_css: list[str] = []
-        selected_title = ""
-        for column, (value, display_name) in zip(st.columns(len(options)), options):
-            config = config_for(value)
-            accent = accent_for(value)
-            # Fail-safe, not fail-silent: an old YAML without domain_name still
-            # renders a titled card — the long display_name — never an empty one.
-            card_title = config.domain_name or display_name
-            card_css.append(
-                # Chip letter is config DATA (domain_letter, not value[0] —
-                # health's chip is "S", not "H"). The sub-label carries the REAL
-                # document count via the light corpus_stats_for façade (cached;
-                # no LLM warm-up on the welcome).
-                f".st-key-citara-welcome .st-key-citara-domain-{value} button::before"
-                f"{{content:'{config.domain_letter}';}}"
-                f".st-key-citara-welcome .st-key-citara-domain-{value} button::after"
-                f"{{content:'{_document_count_label(config, _corpus_stats_for(value))}';}}"
-                f".st-key-citara-welcome .st-key-citara-domain-{value} button:hover"
-                f"{{border-color:{accent['line']};}}"
-            )
-            if value == selected:
-                selected_title = card_title
-                # .domain-card.active — accent tint + border on the card, chip
-                # flipped to solid accent (the mock's .active .domain-letter).
-                # Hover/focus states repeated so the generic gray hover above
-                # never washes out the active card.
-                card_css.append(
-                    f".st-key-citara-welcome .st-key-citara-domain-{value} button,"
-                    f".st-key-citara-welcome .st-key-citara-domain-{value} button:hover,"
-                    f".st-key-citara-welcome .st-key-citara-domain-{value} button:focus-visible,"
-                    f".st-key-citara-welcome .st-key-citara-domain-{value} button:active"
-                    f"{{background:{accent['tint']}; border-color:{accent['line']}; color:var(--text);}}"
-                    f".st-key-citara-welcome .st-key-citara-domain-{value} button::before"
-                    f"{{background:{accent['accent']}; color:{accent['on']}; border:none;}}"
-                )
-            with column:
-                st.button(
-                    card_title,
-                    key=f"citara-domain-{value}",
-                    width="stretch",
-                    on_click=select_vertical,
-                    args=(value,),
-                )
-        # The CTA's colors track the SELECTION, not the page accent — main() brands
-        # the welcome once with the first Vertical, so var(--accent) would lag.
-        cta_accent = accent_for(selected)
-        card_css.append(
-            ".st-key-citara-welcome .st-key-citara-comenzar button,"
-            ".st-key-citara-welcome .st-key-citara-comenzar button:hover,"
-            ".st-key-citara-welcome .st-key-citara-comenzar button:focus-visible,"
-            ".st-key-citara-welcome .st-key-citara-comenzar button:active"
-            f"{{background:{cta_accent['accent']}; color:{cta_accent['on']}; border:none;}}"
-        )
-        st.markdown(f"<style>{''.join(card_css)}</style>", unsafe_allow_html=True)
-        st.button(
-            f"Comenzar · {selected_title} →",
-            key="citara-comenzar",
-            width="stretch",
-            on_click=enter_chat,
-        )
-        st.markdown(
-            '<div class="welcome-foot">No se envía nada a internet · '
-            "sin telemetría · sin cuentas</div>",
-            unsafe_allow_html=True,
-        )
-
-
 # --- main --------------------------------------------------------------------
 
 
@@ -396,7 +214,7 @@ def main() -> None:
         # on first load) with the first configured accent.
         inject_theme(values[0])
         render_splash()
-        _render_welcome(options)
+        render_welcome(options)
         return
 
     # Sidebar: brand, Ollama-badge slot, Vertical switcher, foot-note (tokens from
@@ -502,7 +320,7 @@ def main() -> None:
 
     # Read-only Corpus section under the header — real counts through the
     # engine façade; presentation never touches ChromaDB (golden rule 1).
-    _render_corpus_panel(engine, config)
+    render_corpus_panel(engine, config)
 
     history = history_for(vertical_value)
 
