@@ -15,12 +15,9 @@ on the first query (NFR6/AC7).
 
 from __future__ import annotations
 
-import re
-from collections.abc import Iterator
 from html import escape
 
 import streamlit as st
-from streamlit.delta_generator import DeltaGenerator
 
 from core.engine import RagEngine
 
@@ -31,14 +28,27 @@ from core.generate import _ABSTENTION_TEXT
 from core.ingest import load_vertical_config
 from core.models import (
     Answer,
-    Citation,
     CorpusStats,
-    EmptyCorpusError,
-    ModelNotPulledError,
-    OllamaUnreachableError,
     RagEngineError,
     Vertical,
     VerticalConfig,
+)
+
+# _error_presentation / _is_abstention_text are module-private on purpose: app.py
+# borrows them only until step 5 moves handle_query into ui/layout.py (provisional
+# cross-module private imports, same criterion as _ABSTENTION_TEXT above).
+from ui.components.error_card import _error_presentation, render_error_card
+from ui.components.loading_card import (
+    FIRST_SPINNER_TEXT,
+    SPINNER_TEXT,
+    render_loading_card,
+    spinner_until_first_token,
+)
+from ui.components.sidebar import render_ollama_badge
+from ui.components.sources_panel import (
+    _is_abstention_text,
+    render_abstention_label,
+    render_sources_panel,
 )
 from ui.state import (
     KEY_ENTERED,
@@ -54,11 +64,6 @@ from ui.state import (
     sync_vertical,
 )
 from ui.theme import LOGO_PATH, accent_for, inject_theme, render_splash
-
-_SPINNER_TEXT = "Generando la respuesta…"
-# Safety net for a still-cold model (warm-up failed or hasn't finished): an honest,
-# one-off message so the first, slower answer doesn't read as a hang.
-_FIRST_SPINNER_TEXT = "Preparando el modelo; la primera respuesta puede tardar unos segundos…"
 
 
 # --- cached construction -----------------------------------------------------
@@ -132,135 +137,6 @@ def _document_count_label(config: VerticalConfig, stats: CorpusStats) -> str:
     return f"{config.domain_sublabel} · {count}" if config.domain_sublabel else count
 
 
-# --- error translation (NFR6/AC7) --------------------------------------------
-
-# All user-visible error copy is born HERE, in Spanish: core/ raises technical
-# English messages (those are code, kept as the .err-tech trace), and this layer
-# maps the TYPED exception to the mock's actionable card. Commands and model
-# names come from the VerticalConfig — never from mock literals (the mock says
-# "llama3.1 · 4,7 GB"; the real model is whatever llm_model says, and the weight
-# is omitted because there is no reliable source for it).
-
-# core quotes the offending model name single-quoted in its messages.
-_QUOTED = re.compile(r"'([^']+)'")
-
-
-def _error_presentation(exc: RagEngineError, config: VerticalConfig) -> dict[str, str | None]:
-    """Map a domain error to the card fields (Spanish copy + real command)."""
-    host = escape(config.ollama_base_url.removeprefix("http://").removeprefix("https://"))
-    if isinstance(exc, OllamaUnreachableError):
-        return {
-            "kind": "servicio",
-            "title": "Ollama no está disponible",
-            "body": (
-                "No se pudo conectar con el modelo local en "
-                f'<span class="mono err-code">{host}</span>. '
-                "Arráncalo en una terminal y reintenta."
-            ),
-            "command": "ollama serve",
-            "technical": str(exc),
-            "llm_model": config.llm_model,
-            "host": config.ollama_base_url,
-        }
-    if isinstance(exc, ModelNotPulledError):
-        # The missing model can be the LLM or the Embedder's (both preflights
-        # raise this type); core carries it single-quoted in the message. The
-        # llm_model fallback keeps the command real either way.
-        match = _QUOTED.search(str(exc))
-        model = match.group(1) if match else config.llm_model
-        return {
-            "kind": "modelo",
-            "title": "El modelo no está descargado",
-            "body": (
-                f'El modelo <span class="mono err-code">{escape(model)}</span> '
-                "no está en Ollama. Descárgalo una sola vez para empezar."
-            ),
-            "command": f"ollama pull {model}",
-            "technical": str(exc),
-            "llm_model": config.llm_model,
-            "host": config.ollama_base_url,
-        }
-    if isinstance(exc, EmptyCorpusError):
-        return {
-            "kind": "corpus",
-            "title": "El corpus está vacío",
-            "body": (
-                "No hay documentos ingestados para esta Vertical. Coloca los PDF en "
-                f'<span class="mono err-code">{escape(config.corpus_path)}</span> '
-                "y lanza la ingesta desde una terminal."
-            ),
-            "command": f"python -m core.ingest --vertical {config.vertical.value}",
-            "technical": str(exc),
-        }
-    return {
-        "kind": "motor",
-        "title": "No se pudo completar la operación",
-        "body": (
-            "La operación falló de forma inesperada. El detalle técnico de "
-            "abajo indica la causa."
-        ),
-        "technical": str(exc),
-    }
-
-
-@st.dialog("Poner Ollama en marcha")
-def _show_install_guide(llm_model: str, host: str) -> None:
-    """Spanish step-by-step to install/start Ollama and pull the model.
-
-    Real commands only, model/host from VerticalConfig — the same honesty rule
-    as the card itself.
-    """
-    st.markdown(
-        "**1 · Instala Ollama** (una sola vez) desde "
-        "[ollama.com/download](https://ollama.com/download)."
-    )
-    st.markdown(f"**2 · Arranca el servidor** en una terminal; debe quedar escuchando en `{host}`:")
-    st.code("ollama serve", language="bash")
-    st.markdown("**3 · Descarga el modelo** (una sola vez):")
-    st.code(f"ollama pull {llm_model}", language="bash")
-    st.markdown("**4 · Vuelve aquí** y pulsa «Reintentar conexión».")
-
-
-def _render_error_card(
-    kind: str,
-    title: str,
-    body: str,
-    command: str | None = None,
-    technical: str | None = None,
-    llm_model: str | None = None,
-    host: str | None = None,
-    key_suffix: str = "live",
-) -> None:
-    """Render an actionable error as the mock's state-card (05-errors.html).
-
-    HTML paints the static part (``body`` is presentation-crafted HTML; dynamic
-    values are escaped in _error_presentation). The command is st.code so the
-    copy button is REAL (native), and the buttons are real widgets: retry reruns
-    the script — the health preflight re-executes on every run — and the guide
-    opens a dialog. ``key_suffix`` keeps widget keys unique: the history replay
-    plus a live card can put several of these on one page.
-    """
-    tech_html = f'<div class="err-tech">{escape(technical)}</div>' if technical else ""
-    with st.container(key=f"citara-error-{key_suffix}"):
-        st.markdown(
-            f'<div class="label err-label">Error accionable · {escape(kind)}</div>'
-            '<div class="err-row"><div class="err-icon">!</div>'
-            f'<div class="err-main"><div class="err-title">{escape(title)}</div>'
-            f'<div class="err-body">{body}</div>{tech_html}</div></div>',
-            unsafe_allow_html=True,
-        )
-        if command:
-            st.code(command, language="bash")
-        # Buttons only where they are functional (the Ollama cards). Download
-        # arrives in #05b; "choose another model" is icebox — neither is faked.
-        if kind in ("servicio", "modelo") and llm_model and host:
-            with st.container(horizontal=True):
-                if st.button("Reintentar conexión", key=f"citara-retry-{key_suffix}"):
-                    st.rerun()
-                if st.button("Ver guía de instalación", key=f"citara-guide-{key_suffix}"):
-                    _show_install_guide(llm_model, host)
-
-
 def _render_corpus_panel(engine: RagEngine, config: VerticalConfig) -> None:
     """Read-only Corpus section (mock 06, loaded state) with REAL stats.
 
@@ -274,7 +150,7 @@ def _render_corpus_panel(engine: RagEngine, config: VerticalConfig) -> None:
         try:
             stats = engine.corpus_stats()
         except RagEngineError as exc:
-            _render_error_card(**_error_presentation(exc, config), key_suffix="corpus")
+            render_error_card(**_error_presentation(exc, config), key_suffix="corpus")
             return
         chunks_fmt = f"{stats.chunk_count:,}".replace(",", " ")  # mock: "3 412"
         rows = "".join(
@@ -322,145 +198,8 @@ def _check_dependencies(engine: RagEngine, config: VerticalConfig) -> RagEngineE
         engine.check_health()
         return None
     except RagEngineError as exc:
-        _render_error_card(**_error_presentation(exc, config), key_suffix="preflight")
+        render_error_card(**_error_presentation(exc, config), key_suffix="preflight")
         return exc
-
-
-def _render_ollama_badge(
-    slot: DeltaGenerator,
-    config: VerticalConfig,
-    preflight_error: RagEngineError | None,
-    connecting: bool = False,
-) -> None:
-    """Fill the sidebar's .local-badge slot with the REAL Ollama state.
-
-    Three honest states from the preflight that already ran (never a second
-    check_health, never a hardcoded green): connected, model-not-pulled (the
-    server DID answer — claiming "no connection" would lie the other way), and
-    unreachable. ``connecting`` paints the honest interim while the engine
-    (re)builds — the slot must never sit empty during a Vertical switch; the
-    real state overwrites this same slot once the preflight resolves. Model
-    and host come from VerticalConfig, not mock literals.
-    """
-    if connecting:
-        dot, status = "dot-neutral", "Conectando…"
-    elif preflight_error is None:
-        dot, status = "dot-ok", "Conectado a Ollama"
-    elif isinstance(preflight_error, ModelNotPulledError):
-        dot, status = "dot-warn", "Modelo no descargado"
-    else:
-        dot, status = "dot-warn", "Sin conexión con Ollama"
-    host = escape(config.ollama_base_url.removeprefix("http://").removeprefix("https://"))
-    slot.markdown(
-        '<div class="side-badge">'
-        f'<div class="side-badge-status"><span class="dot {dot}"></span>'
-        f"<span>{status}</span></div>"
-        f'<div class="side-badge-model">{escape(config.llm_model)} · {host}</div>'
-        '<div class="side-badge-local">Sin conexión a la nube · 100% local</div>'
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-
-# --- SourcesPanel (FR9/AC2) --------------------------------------------------
-
-
-def _render_abstention_label() -> None:
-    """The dashed «Sin coincidencias» pill shown above an abstention answer."""
-    st.markdown(
-        '<span class="abstain-label">Sin coincidencias en los documentos</span>',
-        unsafe_allow_html=True,
-    )
-
-
-def _is_abstention_text(text: str) -> bool:
-    """Detect an abstention answered in prose.
-
-    The deterministic empty-context guard yields ``_ABSTENTION_TEXT`` whole, but
-    the LLM can also open with that same sentence when the retrieved chunks don't
-    actually answer the question. Both cases must get the calm abstention
-    treatment — and an answer that says "I can't find this" must not dangle a
-    contradictory sources list underneath.
-    """
-    return text.strip().startswith(_ABSTENTION_TEXT)
-
-
-@st.dialog("Fragmento citado")
-def _show_citation_fragment(citation: Citation) -> None:
-    """#09-lite source viewer: the REAL chunk text behind one Citation.
-
-    Styled as the mock's paper page (09-source-viewer.html). Text only, straight
-    from the retrieved Chunk's provenance — no PDF render, no in-page offsets,
-    no prev/next navigation (that is #09-full, a later sub-step).
-    """
-    passage = escape(citation.chunk_text).replace("\n", "<br>")
-    header = (
-        f'<span class="src-id">{escape(citation.document_id)}</span>'
-        f'<span class="src-page">pág. {citation.page}</span>'
-    )
-    if citation.section:
-        header += f'<span class="src-type">{escape(citation.section)}</span>'
-    with st.container(key="citara-fragview"):
-        st.markdown(
-            f'<div class="frag-head">{header}</div>'
-            f'<div class="pdf-page"><p><mark class="hl">{passage}</mark></p></div>'
-            '<div class="frag-note">Fragmento recuperado tal cual del documento.</div>',
-            unsafe_allow_html=True,
-        )
-
-
-def _render_sources_panel(answer: Answer, key_suffix: str = "live") -> None:
-    """Render the Citations behind one Answer: document_id + page (+ section).
-
-    Abstention is shown explicitly as an expected state (no sources), never styled
-    as an error — abstaining is the correct behaviour when context is insufficient.
-    ``key_suffix`` keeps the "Abrir fragmento" button keys unique across the
-    history replay and the live answer (same pattern as the error cards).
-    """
-    if answer.is_abstention:
-        # Calm .note box from the design — neutral greys, no alarm.
-        st.markdown(
-            '<div class="note"><span class="note-i">i</span><div class="note-text">'
-            "Esto es una respuesta esperada, no un fallo. Citara se abstiene cuando "
-            "la pregunta queda fuera de los documentos cargados."
-            '<br><span class="note-sub">Sin fragmentos con coincidencia suficiente</span>'
-            "</div></div>",
-            unsafe_allow_html=True,
-        )
-        return
-
-    with st.expander(f"Fuentes ({len(answer.citations)})"):
-        # One row per Citation: the .source-card HTML (index chip + mono
-        # document_id + page pill, + section when present) beside a REAL
-        # "Abrir fragmento" button opening the #09-lite viewer. document_id/
-        # section come from corpus files, so escape them before embedding.
-        #
-        # TODO: inline [n] markers in the answer body (the design's .cite) need the
-        # Generator to emit marker positions; not built yet.
-        with st.container(key=f"citara-sources-{key_suffix}"):
-            for index, citation in enumerate(answer.citations, start=1):
-                meta = (
-                    f'<span class="src-id">{escape(citation.document_id)}</span>'
-                    f'<span class="src-page">pág. {citation.page}</span>'
-                )
-                if citation.section:
-                    meta += f'<span class="src-type">{escape(citation.section)}</span>'
-                with st.container(horizontal=True, vertical_alignment="center"):
-                    st.markdown(
-                        '<div class="source-card">'
-                        f'<div class="src-index">{index}</div>'
-                        f'<div class="src-meta">{meta}</div>'
-                        "</div>",
-                        unsafe_allow_html=True,
-                    )
-                    # No captured text (e.g. a Citation from an older session
-                    # history) → no button; never open an empty viewer.
-                    if citation.chunk_text:
-                        if st.button(
-                            "Abrir fragmento",
-                            key=f"citara-open-frag-{key_suffix}-{index}",
-                        ):
-                            _show_citation_fragment(citation)
 
 
 # --- chat history (per Vertical) ---------------------------------------------
@@ -473,16 +212,16 @@ def _render_history(history: list[dict]) -> None:
             # Index-suffixed keys: several failed turns = several cards, and
             # their retry/guide buttons must not collide.
             if message.get("error") is not None:
-                _render_error_card(**message["error"], key_suffix=f"history-{index}")
+                render_error_card(**message["error"], key_suffix=f"history-{index}")
                 continue
             answer = message.get("answer")
             # Design order: the abstention pill sits ABOVE the answer body.
             if message["role"] == "assistant" and answer is not None and answer.is_abstention:
-                _render_abstention_label()
+                render_abstention_label()
             st.markdown(message["text"])
             # Assistant turns carry their Answer so the SourcesPanel survives reruns.
             if message["role"] == "assistant" and answer is not None:
-                _render_sources_panel(answer, key_suffix=f"history-{index}")
+                render_sources_panel(answer, key_suffix=f"history-{index}")
 
 
 def _render_empty_state(config: VerticalConfig) -> None:
@@ -611,56 +350,6 @@ def _render_welcome(options: list[tuple[str, str]]) -> None:
         )
 
 
-def _render_loading_card(label_text: str) -> None:
-    """The mock's loading state-card: pulsing C¹ avatar, shimmer lines, phase row.
-
-    Static presentation mapped to REAL stream milestones, never to timers:
-    retrieval already ran (eager, in answer_stream) by the time this paints, so
-    "Recuperando fragmentos" is shown done; the card is cleared on the first
-    streamed token, which IS the "Redactando" transition. No fake progress.
-    """
-    st.markdown(
-        '<div class="state-card">'
-        f'<div class="label loading-label">{label_text}</div>'
-        '<div class="loading-row">'
-        '<span class="loading-avatar"></span>'
-        '<div class="loading-body">'
-        '<div class="shimmer-line" style="width:100%;"></div>'
-        '<div class="shimmer-line" style="width:92%;"></div>'
-        '<div class="shimmer-line" style="width:64%; margin-bottom:0;"></div>'
-        '<div class="loading-phases">'
-        '<span class="phase-done">✓ Recuperando fragmentos</span>'
-        '<span class="phase-next">· Redactando con citas</span>'
-        '<span class="dots"><span></span><span></span><span></span></span>'
-        "</div></div></div></div>",
-        unsafe_allow_html=True,
-    )
-
-
-def _spinner_until_first_token(text_stream: Iterator[str]) -> Iterator[str]:
-    """Pull the first fragment eagerly, then re-emit it followed by the rest.
-
-    The cold-model load and the wait for the first token happen on the *first*
-    ``next()`` of the stream. Draining that one fragment inside the caller's
-    ``st.spinner`` keeps the spinner up across that wait (retrieval + first token),
-    then ``st.write_stream`` takes over and renders the tokens as they arrive. Any
-    generation error (Ollama down, model missing) surfaces here, still inside the
-    caller's try/except.
-    """
-    iterator = iter(text_stream)
-    try:
-        first = next(iterator)
-    except StopIteration:
-        first = None
-
-    def _rejoined() -> Iterator[str]:
-        if first is not None:
-            yield first
-        yield from iterator
-
-    return _rejoined()
-
-
 # --- main --------------------------------------------------------------------
 
 
@@ -685,7 +374,7 @@ def main() -> None:
         # No Vertical yet, so no accent to pick — inject the base theme (default
         # legal accent) just so this card renders styled.
         inject_theme("legal")
-        _render_error_card(
+        render_error_card(
             kind="config",
             title="No hay ninguna Vertical configurada",
             body=escape(
@@ -773,7 +462,7 @@ def main() -> None:
     # The engine (re)build below can block for seconds (warm-up on a Vertical
     # switch): paint the honest "Conectando…" interim now — earliest point where
     # config (the badge's model line) exists — so the slot never sits empty.
-    _render_ollama_badge(badge_slot, config, None, connecting=True)
+    render_ollama_badge(badge_slot, config, None, connecting=True)
     # Chat header (the mock's .main-head): accent tag-pill with the short
     # Vertical name (fail-safe fallback to display_name, like the welcome
     # cards), the config-sourced tagline (omitted whole when empty), the long
@@ -803,13 +492,13 @@ def main() -> None:
         # A failure to even build the engine (e.g. a missing dependency) — actionable.
         # cache_resource does not memoize exceptions, so the retry rerun rebuilds.
         # Fill the badge honestly before stopping: an empty slot reads as broken.
-        _render_ollama_badge(badge_slot, config, exc)
-        _render_error_card(**_error_presentation(exc, config), key_suffix="engine")
+        render_ollama_badge(badge_slot, config, exc)
+        render_error_card(**_error_presentation(exc, config), key_suffix="engine")
         st.stop()
 
     preflight_error = _check_dependencies(engine, config)
     dependencies_ok = preflight_error is None
-    _render_ollama_badge(badge_slot, config, preflight_error)
+    render_ollama_badge(badge_slot, config, preflight_error)
 
     # Read-only Corpus section under the header — real counts through the
     # engine façade; presentation never touches ChromaDB (golden rule 1).
@@ -839,7 +528,7 @@ def main() -> None:
         # First question of the session? If warm-up didn't fully hide the cold
         # start, show an honest heads-up. Simple per-session flag.
         first_query = not st.session_state.get(KEY_HAS_GENERATED, False)
-        spinner_text = _FIRST_SPINNER_TEXT if first_query else _SPINNER_TEXT
+        spinner_text = FIRST_SPINNER_TEXT if first_query else SPINNER_TEXT
 
         with st.chat_message("assistant"):
             try:
@@ -859,10 +548,10 @@ def main() -> None:
                 try:
                     if streamed.citations:
                         with loading_slot.container(key="citara-loading"):
-                            _render_loading_card(spinner_text)
+                            render_loading_card(spinner_text)
                     # The first next() inside blocks through the first-token wait
                     # (cold model load included); the card lives exactly that long.
-                    primed = _spinner_until_first_token(streamed.text_stream)
+                    primed = spinner_until_first_token(streamed.text_stream)
                 finally:
                     # Success, RagEngineError or empty stream alike — never leave
                     # the card orphaned above the answer or the error card.
@@ -886,7 +575,7 @@ def main() -> None:
                 # first "Ver guía" click would be silently dropped (retry only
                 # survived because its action IS the rerun). This failed turn is
                 # appended right below, so its history index IS len(history).
-                _render_error_card(**presentation, key_suffix=f"history-{len(history)}")
+                render_error_card(**presentation, key_suffix=f"history-{len(history)}")
                 history.append(
                     {"role": "assistant", "text": str(exc), "answer": None, "error": presentation}
                 )
@@ -900,7 +589,7 @@ def main() -> None:
             if not streamed.citations or _is_abstention_text(full_text):
                 answer = Answer.abstention(full_text or _ABSTENTION_TEXT)
                 with label_slot.container():
-                    _render_abstention_label()
+                    render_abstention_label()
             else:
                 answer = Answer(text=full_text, citations=streamed.citations)
             # The suffix must be STABLE across the live→history transition: a
@@ -909,7 +598,7 @@ def main() -> None:
             # exist in the new run and the click would be silently dropped.
             # This assistant turn is appended right below, so its history index
             # IS len(history) at this moment (the user turn is already in).
-            _render_sources_panel(answer, key_suffix=f"history-{len(history)}")
+            render_sources_panel(answer, key_suffix=f"history-{len(history)}")
 
         history.append({"role": "assistant", "text": answer.text, "answer": answer})
 
