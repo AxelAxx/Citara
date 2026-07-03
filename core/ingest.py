@@ -351,7 +351,14 @@ _DEFAULT_EMBEDDING_MODEL = "bge-m3"
 _DEFAULT_LLM_MODEL = "qwen2.5:7b"
 
 
-def _load_vertical_config(vertical: Vertical) -> VerticalConfig:
+def load_vertical_config(vertical: Vertical) -> VerticalConfig:
+    """Read config/<vertical>.yaml into a VerticalConfig — the ONE config reader.
+
+    Public on purpose: the engine (``from_vertical``) and the presentation layer
+    both resolve config through this single seam, so ingest and query can never
+    read different model names (rule 4). Module 9 may still move it to a
+    dedicated config module; callers won't change.
+    """
     try:
         import yaml
     except ImportError as exc:
@@ -389,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    config = _load_vertical_config(Vertical(args.vertical))
+    config = load_vertical_config(Vertical(args.vertical))
     result = ingest(config)
 
     # main() is the composition root for the OFFLINE pipeline: it builds the concrete

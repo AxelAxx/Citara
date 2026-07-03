@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 from core.embed import OllamaEmbedder
 from core.generate import Generator
-from core.ingest import _load_vertical_config  # see TODO(module 9) below
+from core.ingest import load_vertical_config
 from core.models import (
     Answer,
     Citation,
@@ -122,12 +122,12 @@ class RagEngine:
     def from_vertical(cls, vertical: Vertical) -> "RagEngine":
         """Load the Vertical's YAML config, then wire the engine from it.
 
-        TODO(module 9 / config): YAML loading is reused from ``ingest.py``'s minimal
-        ``_load_vertical_config`` so there is exactly one place that reads config
-        today. Module 9 will own a dedicated config loader; until then we share that
-        single helper rather than duplicate the parsing here.
+        YAML loading is shared with ``ingest.py``'s ``load_vertical_config`` so
+        there is exactly one place that reads config (rule 4: ingest and query can
+        never diverge on model names). A dedicated config module (module 9) may
+        own it later; this call site won't change.
         """
-        config = _load_vertical_config(vertical)
+        config = load_vertical_config(vertical)
         return cls.from_vertical_config(config)
 
     # --- the use case --------------------------------------------------------

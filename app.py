@@ -28,7 +28,7 @@ from core.engine import RagEngine
 # concern, not domain logic. We reuse ingest.py's minimal loader so config is read
 # in one place; TODO(module 9): a dedicated config module will own this.
 from core.generate import _ABSTENTION_TEXT
-from core.ingest import _load_vertical_config
+from core.ingest import load_vertical_config
 from core.models import (
     Answer,
     Citation,
@@ -61,7 +61,7 @@ def _vertical_options() -> list[tuple[str, str]]:
     options: list[tuple[str, str]] = []
     for vertical in Vertical:
         try:
-            config = _load_vertical_config(vertical)
+            config = load_vertical_config(vertical)
         except RagEngineError:
             continue  # a Vertical with no/invalid YAML simply isn't offered
         options.append((vertical.value, config.display_name))
@@ -77,7 +77,7 @@ def _load_engine(vertical_value: str) -> RagEngine:
     interaction) would be wasteful and slow. Keyed by the Vertical value, so
     switching Vertical loads that Vertical's engine and keeps each cached.
     """
-    engine = RagEngine.from_vertical_config(_load_vertical_config(Vertical(vertical_value)))
+    engine = RagEngine.from_vertical_config(load_vertical_config(Vertical(vertical_value)))
     # Warm up the LLM here, inside the memoized builder, so it preloads Qwen into
     # VRAM once per Vertical (on first construction) — never on every rerun — while
     # the user is still reading the UI. This turns the ~4.7GB cold-start into
@@ -105,7 +105,7 @@ def _corpus_stats_for(vertical_value: str) -> CorpusStats:
     offline ingest CLI, so reruns can reuse it (the same staleness trade-off
     _load_engine already accepts).
     """
-    return RagEngine.corpus_stats_for(_load_vertical_config(Vertical(vertical_value)))
+    return RagEngine.corpus_stats_for(load_vertical_config(Vertical(vertical_value)))
 
 
 def _document_count_label(config: VerticalConfig, stats: CorpusStats) -> str:
@@ -584,7 +584,7 @@ def _render_welcome(options: list[tuple[str, str]]) -> None:
         card_css: list[str] = []
         selected_title = ""
         for column, (value, display_name) in zip(st.columns(len(options)), options):
-            config = _load_vertical_config(Vertical(value))
+            config = load_vertical_config(Vertical(value))
             accent = accent_for(value)
             # Fail-safe, not fail-silent: an old YAML without domain_name still
             # renders a titled card — the long display_name — never an empty one.
@@ -784,7 +784,7 @@ def main() -> None:
         )
         # Real document count for the ACTIVE Vertical — same cached route and
         # same format as the welcome cards, so the two can never diverge.
-        active_config = _load_vertical_config(Vertical(vertical_value))
+        active_config = load_vertical_config(Vertical(vertical_value))
         st.markdown(
             '<div class="side-domain-meta">'
             f"{escape(_document_count_label(active_config, _corpus_stats_for(vertical_value)))}"
@@ -806,7 +806,7 @@ def main() -> None:
     # plays exactly once per page load and never replays on reruns.
     render_splash()
 
-    config: VerticalConfig = _load_vertical_config(Vertical(vertical_value))
+    config: VerticalConfig = load_vertical_config(Vertical(vertical_value))
     # The engine (re)build below can block for seconds (warm-up on a Vertical
     # switch): paint the honest "Conectando…" interim now — earliest point where
     # config (the badge's model line) exists — so the slot never sits empty.
