@@ -12,8 +12,7 @@ import streamlit as st
 
 from core.engine import RagEngine
 
-# private import, provisional; promote in V3 (single consumer: _handle_query)
-from core.generate import _ABSTENTION_TEXT
+from core.generate import ABSTENTION_TEXT
 from core.models import Answer, RagEngineError, VerticalConfig
 from ui.components.error_card import error_presentation, render_error_card
 from ui.components.loading_card import (
@@ -181,7 +180,7 @@ def render_chat_area(
             # — in both cases showing sources under "I can't find this" would
             # contradict the answer, so the Answer drops them.
             if not streamed.citations or _is_abstention_text(full_text):
-                answer = Answer.abstention(full_text or _ABSTENTION_TEXT)
+                answer = Answer.abstention(full_text or ABSTENTION_TEXT)
                 with label_slot.container():
                     render_abstention_label()
             else:

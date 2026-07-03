@@ -9,8 +9,7 @@ from html import escape
 
 import streamlit as st
 
-# private import, provisional; promote in V3
-from core.generate import _ABSTENTION_TEXT
+from core.generate import ABSTENTION_TEXT
 from core.models import Answer, Citation
 
 # --- SourcesPanel (FR9/AC2) --------------------------------------------------
@@ -27,13 +26,13 @@ def render_abstention_label() -> None:
 def _is_abstention_text(text: str) -> bool:
     """Detect an abstention answered in prose.
 
-    The deterministic empty-context guard yields ``_ABSTENTION_TEXT`` whole, but
+    The deterministic empty-context guard yields ``ABSTENTION_TEXT`` whole, but
     the LLM can also open with that same sentence when the retrieved chunks don't
     actually answer the question. Both cases must get the calm abstention
     treatment — and an answer that says "I can't find this" must not dangle a
     contradictory sources list underneath.
     """
-    return text.strip().startswith(_ABSTENTION_TEXT)
+    return text.strip().startswith(ABSTENTION_TEXT)
 
 
 @st.dialog("Fragmento citado")

@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from core.generate import Generator, _ABSTENTION_TEXT
+from core.generate import Generator, ABSTENTION_TEXT
 from core.models import (
     Answer,
     Chunk,
@@ -137,7 +137,7 @@ def test_empty_context_abstains_without_calling_llm(monkeypatch):
     assert isinstance(answer, Answer)
     assert answer.is_abstention is True
     assert answer.citations == []
-    assert answer.text == _ABSTENTION_TEXT
+    assert answer.text == ABSTENTION_TEXT
 
 
 # --- FR7: grounded prompt carries formatted citable blocks -------------------
@@ -328,8 +328,8 @@ def test_generate_stream_empty_context_abstains_without_calling_llm(monkeypatch)
 
     got = list(generator.generate_stream(Query(text="¿algo?"), context=[]))
 
-    assert got == [_ABSTENTION_TEXT]  # the abstention sentence, yielded whole
-    assert "".join(got) == _ABSTENTION_TEXT
+    assert got == [ABSTENTION_TEXT]  # the abstention sentence, yielded whole
+    assert "".join(got) == ABSTENTION_TEXT
 
 
 def test_generate_stream_raises_unreachable_before_yielding(monkeypatch):

@@ -31,7 +31,7 @@ example_questions:
 # Rules are identical across verticals; only tone/domain framing differs (here:
 # juridical tone, referring to "documentos legales / normativa" instead of
 # "guías clínicas"). The abstention sentence is byte-identical to health.yaml and
-# to the hard guard in core/generate.py (_ABSTENTION_TEXT) — do not paraphrase it.
+# to the hard guard in core/generate.py (ABSTENTION_TEXT) — do not paraphrase it.
 system_prompt: |
   Eres un asistente que responde preguntas sobre normativa y documentos legales
   españoles (legislación publicada en el BOE), ÚNICAMENTE a partir de los

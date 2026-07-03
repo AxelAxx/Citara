@@ -61,7 +61,7 @@ _DEFAULT_TEMPERATURE = 0.1
 
 # The Abstention text (Spanish — this is end-user UI content, FR8/G5). Centralized
 # so the deterministic guard and any future LLM-side abstention read identically.
-_ABSTENTION_TEXT = "No encuentro esto en los documentos proporcionados."
+ABSTENTION_TEXT = "No encuentro esto en los documentos proporcionados."
 
 
 class Generator:
@@ -97,7 +97,7 @@ class Generator:
         # abstention. Return early before any model interaction so an empty corpus
         # or a zero-hit retrieval can never yield an invented answer.
         if not context:
-            return Answer.abstention(_ABSTENTION_TEXT)
+            return Answer.abstention(ABSTENTION_TEXT)
 
         prompt = self._build_prompt(query, context)
         text = self._invoke_llm(prompt)
@@ -125,7 +125,7 @@ class Generator:
         # never calls the LLM. Yield-then-return so the caller's stream sink shows the
         # identical text the non-streaming path would return.
         if not context:
-            yield _ABSTENTION_TEXT
+            yield ABSTENTION_TEXT
             return
 
         prompt = self._build_prompt(query, context)

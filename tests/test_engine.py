@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from core.engine import RagEngine, StreamedAnswer
-from core.generate import _ABSTENTION_TEXT
+from core.generate import ABSTENTION_TEXT
 from core.models import Answer, Chunk, ChunkMetadata, Citation, Query, Vertical, VerticalConfig
 
 
@@ -46,7 +46,7 @@ class _FakeGenerator:
         # abstention sentence whole, no LLM call); otherwise yield the fragments.
         self.stream_calls.append({"query": query, "context": context})
         if not context:
-            yield _ABSTENTION_TEXT
+            yield ABSTENTION_TEXT
             return
         yield from self._fragments
 
@@ -256,7 +256,7 @@ def test_answer_stream_empty_context_abstains_with_no_citations():
 
     # Coherent with answer(): empty context ⇒ abstention text streamed, no citations,
     # and no LLM fragments used.
-    assert list(streamed.text_stream) == [_ABSTENTION_TEXT]
+    assert list(streamed.text_stream) == [ABSTENTION_TEXT]
     assert streamed.citations == []
 
 
