@@ -27,10 +27,11 @@ from core.models import (
     VerticalConfig,
 )
 
-# _error_presentation / _is_abstention_text are module-private on purpose: app.py
-# borrows them only until step 5 moves handle_query into ui/layout.py (provisional
-# cross-module private imports, same criterion as _ABSTENTION_TEXT above).
-from ui.components.error_card import _error_presentation, render_error_card
+# error_presentation is shared public API: the boot/preflight cards here and the
+# query path (moving to ui/layout.py in step 5) map errors through the same
+# function. _is_abstention_text stays a provisional private import — single
+# consumer (handle_query), it moves out with it (same criterion as _ABSTENTION_TEXT).
+from ui.components.error_card import error_presentation, render_error_card
 from ui.components.loading_card import (
     FIRST_SPINNER_TEXT,
     SPINNER_TEXT,
@@ -111,7 +112,7 @@ def _check_dependencies(engine: RagEngine, config: VerticalConfig) -> RagEngineE
         engine.check_health()
         return None
     except RagEngineError as exc:
-        render_error_card(**_error_presentation(exc, config), key_suffix="preflight")
+        render_error_card(**error_presentation(exc, config), key_suffix="preflight")
         return exc
 
 
@@ -311,7 +312,7 @@ def main() -> None:
         # cache_resource does not memoize exceptions, so the retry rerun rebuilds.
         # Fill the badge honestly before stopping: an empty slot reads as broken.
         render_ollama_badge(badge_slot, config, exc)
-        render_error_card(**_error_presentation(exc, config), key_suffix="engine")
+        render_error_card(**error_presentation(exc, config), key_suffix="engine")
         st.stop()
 
     preflight_error = _check_dependencies(engine, config)
@@ -385,7 +386,7 @@ def main() -> None:
                 # model not pulled) all carry actionable messages — Ollama-down
                 # raises on the first streamed fragment, before any text is shown.
                 # Surface them as the design's error card, keep the app alive.
-                presentation = _error_presentation(exc, config)
+                presentation = error_presentation(exc, config)
                 # The suffix must be STABLE across the live→history transition
                 # (same fix as the SourcesPanel): a button click triggers a
                 # rerun where this card re-renders from history — with a "live-"

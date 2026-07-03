@@ -1,9 +1,10 @@
 """Actionable error card (NFR6/AC7): domain error -> Spanish fix-it card.
 
-Extracted verbatim from app.py (V2 step 3). ``_error_presentation`` stays
-module-private: app.py imports it privately until step 5 moves handle_query
-into ui/layout.py (provisional cross-module private import, same criterion
-as _ABSTENTION_TEXT in sources_panel).
+Extracted verbatim from app.py (V2 step 3). ``error_presentation`` is public
+API alongside ``render_error_card``: every presentation-layer consumer that
+catches a RagEngineError (app.py's boot/preflight, the corpus panel, the query
+path) maps it to card fields through this one function, so the Spanish error
+copy can never fork.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from core.models import (
 _QUOTED = re.compile(r"'([^']+)'")
 
 
-def _error_presentation(exc: RagEngineError, config: VerticalConfig) -> dict[str, str | None]:
+def error_presentation(exc: RagEngineError, config: VerticalConfig) -> dict[str, str | None]:
     """Map a domain error to the card fields (Spanish copy + real command)."""
     host = escape(config.ollama_base_url.removeprefix("http://").removeprefix("https://"))
     if isinstance(exc, OllamaUnreachableError):
@@ -123,7 +124,7 @@ def render_error_card(
     """Render an actionable error as the mock's state-card (05-errors.html).
 
     HTML paints the static part (``body`` is presentation-crafted HTML; dynamic
-    values are escaped in _error_presentation). The command is st.code so the
+    values are escaped in error_presentation). The command is st.code so the
     copy button is REAL (native), and the buttons are real widgets: retry reruns
     the script — the health preflight re-executes on every run — and the guide
     opens a dialog. ``key_suffix`` keeps widget keys unique: the history replay

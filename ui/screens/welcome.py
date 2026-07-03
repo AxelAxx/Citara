@@ -5,7 +5,7 @@ enum iteration became the documented BYOD seam. Also owns the two cached
 corpus-stat helpers the welcome cards AND the sidebar share (the sidebar
 reuses "the same cached route and same format as the welcome cards, so the
 two can never diverge"); app.py imports them privately until the sidebar
-itself moves (provisional, same criterion as _error_presentation).
+itself moves (provisional, same criterion as _is_abstention_text).
 """
 
 from __future__ import annotations

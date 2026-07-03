@@ -12,9 +12,7 @@ import streamlit as st
 from core.engine import RagEngine
 from core.models import RagEngineError, VerticalConfig
 
-# provisional cross-module private import (same criterion as app.py's):
-# consolidates when error presentation moves with handle_query in step 5
-from ui.components.error_card import _error_presentation, render_error_card
+from ui.components.error_card import error_presentation, render_error_card
 
 
 def render_corpus_panel(engine: RagEngine, config: VerticalConfig) -> None:
@@ -30,7 +28,7 @@ def render_corpus_panel(engine: RagEngine, config: VerticalConfig) -> None:
         try:
             stats = engine.corpus_stats()
         except RagEngineError as exc:
-            render_error_card(**_error_presentation(exc, config), key_suffix="corpus")
+            render_error_card(**error_presentation(exc, config), key_suffix="corpus")
             return
         chunks_fmt = f"{stats.chunk_count:,}".replace(",", " ")  # mock: "3 412"
         rows = "".join(
