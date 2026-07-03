@@ -40,6 +40,19 @@ from core.models import (
     Vertical,
     VerticalConfig,
 )
+from ui.state import (
+    KEY_ENTERED,
+    KEY_HAS_GENERATED,
+    KEY_PENDING_QUERY,
+    KEY_VERTICAL,
+    KEY_VERTICAL_WIDGET,
+    config_for,
+    enter_chat,
+    history_for,
+    queue_query,
+    select_vertical,
+    sync_vertical,
+)
 from ui.theme import LOGO_PATH, accent_for, inject_theme, render_splash
 
 _SPINNER_TEXT = "Generando la respuesta…"
@@ -77,7 +90,7 @@ def _load_engine(vertical_value: str) -> RagEngine:
     interaction) would be wasteful and slow. Keyed by the Vertical value, so
     switching Vertical loads that Vertical's engine and keeps each cached.
     """
-    engine = RagEngine.from_vertical_config(load_vertical_config(Vertical(vertical_value)))
+    engine = RagEngine.from_vertical_config(config_for(vertical_value))
     # Warm up the LLM here, inside the memoized builder, so it preloads Qwen into
     # VRAM once per Vertical (on first construction) — never on every rerun — while
     # the user is still reading the UI. This turns the ~4.7GB cold-start into
@@ -105,7 +118,7 @@ def _corpus_stats_for(vertical_value: str) -> CorpusStats:
     offline ingest CLI, so reruns can reuse it (the same staleness trade-off
     _load_engine already accepts).
     """
-    return RagEngine.corpus_stats_for(load_vertical_config(Vertical(vertical_value)))
+    return RagEngine.corpus_stats_for(config_for(vertical_value))
 
 
 def _document_count_label(config: VerticalConfig, stats: CorpusStats) -> str:
@@ -453,16 +466,6 @@ def _render_sources_panel(answer: Answer, key_suffix: str = "live") -> None:
 # --- chat history (per Vertical) ---------------------------------------------
 
 
-def _history_for(vertical_value: str) -> list[dict]:
-    """The chat history for a Vertical, isolated from the others.
-
-    Keyed by Vertical so switching legal↔health does not mix two distinct
-    conversations (and their sources) into one thread.
-    """
-    histories = st.session_state.setdefault("histories", {})
-    return histories.setdefault(vertical_value, [])
-
-
 def _render_history(history: list[dict]) -> None:
     for index, message in enumerate(history):
         with st.chat_message(message["role"]):
@@ -480,16 +483,6 @@ def _render_history(history: list[dict]) -> None:
             # Assistant turns carry their Answer so the SourcesPanel survives reruns.
             if message["role"] == "assistant" and answer is not None:
                 _render_sources_panel(answer, key_suffix=f"history-{index}")
-
-
-def _queue_query(question: str) -> None:
-    """on_click of an example-question button: queue it for the next rerun.
-
-    The queued value is consumed at the top of main's render cycle and fed
-    through the exact same path as a typed ``st.chat_input`` prompt — one
-    handler for both entry points, no duplicated query flow.
-    """
-    st.session_state["pending_query"] = question
 
 
 def _render_empty_state(config: VerticalConfig) -> None:
@@ -518,39 +511,9 @@ def _render_empty_state(config: VerticalConfig) -> None:
                 question,
                 key=f"citara-suggest-{index}",
                 width="stretch",
-                on_click=_queue_query,
+                on_click=queue_query,
                 args=(question,),
             )
-
-
-def _select_vertical(vertical_value: str) -> None:
-    """on_click of a welcome domain card: select the Vertical, stay on the welcome.
-
-    Writes the flat "vertical" state — the ONE source of truth for the active
-    Vertical, which the sidebar switcher seeds from and syncs back to (see
-    _sync_vertical). Selecting is deliberately NOT entering — that is
-    "Comenzar"'s job (_enter_chat).
-    """
-    st.session_state["vertical"] = vertical_value
-
-
-def _sync_vertical() -> None:
-    """on_change of the sidebar switcher: copy the widget value to "vertical".
-
-    The widget key and the flat key are deliberately separate — binding the
-    widget directly to "vertical" desyncs on first mount (see the comment at
-    the selectbox in main).
-    """
-    st.session_state["vertical"] = st.session_state["vertical_widget"]
-
-
-def _enter_chat() -> None:
-    """on_click of the welcome's "Comenzar" button: enter the chat.
-
-    ``entered`` stays True for the rest of the session — switching Verticals
-    mid-session must never route back through the welcome.
-    """
-    st.session_state["entered"] = True
 
 
 def _render_welcome(options: list[tuple[str, str]]) -> None:
@@ -566,8 +529,8 @@ def _render_welcome(options: list[tuple[str, str]]) -> None:
     """
     # A selection must exist before any click so one card renders active and
     # "Comenzar" has a target: default to the first configured Vertical.
-    st.session_state.setdefault("vertical", options[0][0])
-    selected = st.session_state["vertical"]
+    st.session_state.setdefault(KEY_VERTICAL, options[0][0])
+    selected = st.session_state[KEY_VERTICAL]
     with st.container(key="citara-welcome"):
         st.markdown(
             '<div class="welcome-badge"><span class="dot dot-ok"></span>'
@@ -584,7 +547,7 @@ def _render_welcome(options: list[tuple[str, str]]) -> None:
         card_css: list[str] = []
         selected_title = ""
         for column, (value, display_name) in zip(st.columns(len(options)), options):
-            config = load_vertical_config(Vertical(value))
+            config = config_for(value)
             accent = accent_for(value)
             # Fail-safe, not fail-silent: an old YAML without domain_name still
             # renders a titled card — the long display_name — never an empty one.
@@ -621,7 +584,7 @@ def _render_welcome(options: list[tuple[str, str]]) -> None:
                     card_title,
                     key=f"citara-domain-{value}",
                     width="stretch",
-                    on_click=_select_vertical,
+                    on_click=select_vertical,
                     args=(value,),
                 )
         # The CTA's colors track the SELECTION, not the page accent — main() brands
@@ -639,7 +602,7 @@ def _render_welcome(options: list[tuple[str, str]]) -> None:
             f"Comenzar · {selected_title} →",
             key="citara-comenzar",
             width="stretch",
-            on_click=_enter_chat,
+            on_click=enter_chat,
         )
         st.markdown(
             '<div class="welcome-foot">No se envía nada a internet · '
@@ -739,7 +702,7 @@ def main() -> None:
     # Routing: until a domain card is clicked, the welcome IS the page. `entered`
     # persists for the whole session, so a mid-session Vertical switch (sidebar)
     # never routes back here; a browser reload starts a fresh session → welcome.
-    if not st.session_state.get("entered", False):
+    if not st.session_state.get(KEY_ENTERED, False):
         # No Vertical picked yet — brand the welcome (and the splash covering it
         # on first load) with the first configured accent.
         inject_theme(values[0])
@@ -770,21 +733,21 @@ def main() -> None:
         # key looked cleaner but desyncs: a value written by a welcome on_click
         # renders as index 0 on the widget's first mount, and the next rerun
         # clobbers the session with it (reverting the Vertical to legal).
-        current = st.session_state.setdefault("vertical", values[0])
+        current = st.session_state.setdefault(KEY_VERTICAL, values[0])
         vertical_value = st.selectbox(
             "Selecciona el dominio",
             values,
             index=values.index(current),
             format_func=lambda v: labels.get(v, v),
-            key="vertical_widget",
-            on_change=_sync_vertical,
+            key=KEY_VERTICAL_WIDGET,
+            on_change=sync_vertical,
             # the mock's .section-label above replaces the widget's visible
             # label; the label itself stays for accessibility
             label_visibility="collapsed",
         )
         # Real document count for the ACTIVE Vertical — same cached route and
         # same format as the welcome cards, so the two can never diverge.
-        active_config = load_vertical_config(Vertical(vertical_value))
+        active_config = config_for(vertical_value)
         st.markdown(
             '<div class="side-domain-meta">'
             f"{escape(_document_count_label(active_config, _corpus_stats_for(vertical_value)))}"
@@ -806,7 +769,7 @@ def main() -> None:
     # plays exactly once per page load and never replays on reruns.
     render_splash()
 
-    config: VerticalConfig = load_vertical_config(Vertical(vertical_value))
+    config: VerticalConfig = config_for(vertical_value)
     # The engine (re)build below can block for seconds (warm-up on a Vertical
     # switch): paint the honest "Conectando…" interim now — earliest point where
     # config (the badge's model line) exists — so the slot never sits empty.
@@ -852,7 +815,7 @@ def main() -> None:
     # engine façade; presentation never touches ChromaDB (golden rule 1).
     _render_corpus_panel(engine, config)
 
-    history = _history_for(vertical_value)
+    history = history_for(vertical_value)
 
     def handle_query(prompt: str) -> None:
         """The single query path, shared by st.chat_input and the example buttons.
@@ -875,7 +838,7 @@ def main() -> None:
 
         # First question of the session? If warm-up didn't fully hide the cold
         # start, show an honest heads-up. Simple per-session flag.
-        first_query = not st.session_state.get("has_generated", False)
+        first_query = not st.session_state.get(KEY_HAS_GENERATED, False)
         spinner_text = _FIRST_SPINNER_TEXT if first_query else _SPINNER_TEXT
 
         with st.chat_message("assistant"):
@@ -909,7 +872,7 @@ def main() -> None:
                 # places the abstention pill before the answer body.
                 label_slot = st.empty()
                 full_text = st.write_stream(primed)
-                st.session_state["has_generated"] = True
+                st.session_state[KEY_HAS_GENERATED] = True
             except RagEngineError as exc:
                 # Retrieval/generation failures (empty Collection, Ollama dropped,
                 # model not pulled) all carry actionable messages — Ollama-down
@@ -953,7 +916,7 @@ def main() -> None:
     # A queued example-question click (see _render_empty_state) is consumed at the
     # top of the render cycle, before anything is painted, so its rerun flows
     # through the exact same path as a typed prompt.
-    pending_query = st.session_state.pop("pending_query", None)
+    pending_query = st.session_state.pop(KEY_PENDING_QUERY, None)
 
     # st.chat_input is read BEFORE the empty state on purpose: its value decides
     # whether the welcome renders, and the widget pins itself to the bottom of the
