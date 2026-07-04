@@ -25,6 +25,8 @@ from core.models import (
     VerticalConfig,
 )
 
+from ui.components.chat_header import render_chat_header
+
 # error_presentation is shared public API: the boot/preflight cards here and the
 # query path in ui/layout.py map errors through the same function.
 from ui.components.error_card import error_presentation, render_error_card
@@ -157,28 +159,9 @@ def main() -> None:
     # switch): paint the honest "Conectando…" interim now — earliest point where
     # config (the badge's model line) exists — so the slot never sits empty.
     render_ollama_badge(badge_slot, config, None, connecting=True)
-    # Chat header (the mock's .main-head): accent tag-pill with the short
-    # Vertical name (fail-safe fallback to display_name, like the welcome
-    # cards), the config-sourced tagline (omitted whole when empty), the long
-    # display_name as h1, and a static subtitle. Deliberately NOT shared with
-    # the welcome's subtitle: the two copys differ in the mock ("tus
-    # documentos" vs. "los documentos cargados").
-    tagline_html = (
-        f'<span class="head-tagline">{escape(config.domain_tagline)}</span>'
-        if config.domain_tagline
-        else ""
-    )
-    with st.container(key="citara-head"):
-        st.markdown(
-            '<div class="head-tags">'
-            f'<span class="tag-pill">{escape(config.domain_name or config.display_name)}</span>'
-            f"{tagline_html}</div>"
-            f'<h1 class="head-h1">{escape(config.display_name)}</h1>'
-            '<p class="head-subtitle">Pregunta en español; las respuestas se basan '
-            "<strong>solo</strong> en los documentos cargados, con la fuente exacta "
-            "de cada afirmación.</p>",
-            unsafe_allow_html=True,
-        )
+    # Pre-engine on purpose: the header paints BEFORE _load_engine blocks on the
+    # warm-up, and AFTER inject_theme (its tag-pill uses the --accent-* vars).
+    render_chat_header(config)
 
     try:
         engine = _load_engine(vertical_value)
