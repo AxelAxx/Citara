@@ -1,7 +1,8 @@
-"""Sidebar (mock 02): brand, Ollama-badge slot, Vertical switcher, meta, foot-note.
+"""Sidebar (mock 02): brand, Ollama-badge slot, Vertical switcher cards, corpus, foot.
 
 render_ollama_badge was extracted verbatim from app.py in V2 step 3; the sidebar
-frame (render_sidebar) followed in V2 step 6b-2b, also verbatim.
+frame (render_sidebar) followed in V2 step 6b-2b. The switcher was rebuilt from a
+selectbox into the mock's .domain-card row buttons (welcome button-card pattern).
 """
 
 from __future__ import annotations
@@ -13,15 +14,20 @@ from streamlit.delta_generator import DeltaGenerator
 
 from core.models import ModelNotPulledError, RagEngineError, VerticalConfig
 from ui.components.corpus_meta import corpus_stats_for, document_count_label
-from ui.state import KEY_VERTICAL, KEY_VERTICAL_WIDGET, config_for, sync_vertical
+from ui.state import KEY_CORPUS_OPEN, KEY_VERTICAL, config_for, select_vertical
+from ui.theme import accent_for
 
 
 def render_sidebar(options: list[tuple[str, str]]) -> tuple[str, DeltaGenerator]:
-    """The sidebar frame: brand, badge slot, Vertical switcher, meta, foot-note.
+    """The sidebar frame: brand, badge slot, Vertical switcher cards, corpus, foot.
 
-    Tokens from export/screens/02-chat.html. The switcher is the ONLY thing
-    that differs between demos; everything after it is identical regardless of
-    which Vertical is chosen.
+    Tokens from export/citara.css (.domain-card/.domain-letter/.domain-meta).
+    The switcher is the mock's pair of domain cards — the SAME button-card
+    pattern as the welcome (select_vertical writes the flat KEY_VERTICAL
+    directly; buttons hold no value, so the old selectbox widget-key + sync
+    callback are gone). Card chrome (letter chip, real doc count, active
+    accent) is injected per-card as data-driven CSS, exactly like the welcome
+    cards, so the two switchers can never diverge.
 
     Badge lifecycle contract: the sidebar CREATES badge_slot and fixes its
     position (the st.empty renders the badge ABOVE the switcher); main FILLS it
@@ -29,7 +35,6 @@ def render_sidebar(options: list[tuple[str, str]]) -> tuple[str, DeltaGenerator]
     result, which only exists once the engine is built.
     """
     values = [value for value, _ in options]
-    labels = {value: label for value, label in options}
     with st.sidebar, st.container(key="citara-sidebar"):
         st.markdown(
             '<div class="side-brand"><span class="side-brand-mark"></span>'
@@ -42,32 +47,73 @@ def render_sidebar(options: list[tuple[str, str]]) -> tuple[str, DeltaGenerator]
             '<div class="label side-section-label">Dominio activo</div>',
             unsafe_allow_html=True,
         )
-        # "vertical" (flat session state) is the ONE source of truth for the
-        # active Vertical; the widget deliberately has its OWN key. Sharing the
-        # key looked cleaner but desyncs: a value written by a welcome on_click
-        # renders as index 0 on the widget's first mount, and the next rerun
-        # clobbers the session with it (reverting the Vertical to legal).
-        current = st.session_state.setdefault(KEY_VERTICAL, values[0])
-        vertical_value = st.selectbox(
-            "Selecciona el dominio",
-            values,
-            index=values.index(current),
-            format_func=lambda v: labels.get(v, v),
-            key=KEY_VERTICAL_WIDGET,
-            on_change=sync_vertical,
-            # the mock's .section-label above replaces the widget's visible
-            # label; the label itself stays for accessibility
-            label_visibility="collapsed",
-        )
-        # Real document count for the ACTIVE Vertical — same cached route and
-        # same format as the welcome cards, so the two can never diverge.
-        active_config = config_for(vertical_value)
+        # A selection must exist before any click (same seeding as the welcome).
+        st.session_state.setdefault(KEY_VERTICAL, values[0])
+        selected = st.session_state[KEY_VERTICAL]
+        card_css: list[str] = []
+        for value, display_name in options:
+            config = config_for(value)
+            accent = accent_for(value)
+            card_css.append(
+                # Chip letter is config DATA (domain_letter); the sub-label
+                # carries the REAL document count via the light corpus_stats_for
+                # façade — same cached route and same format as the welcome
+                # cards, so the two can never diverge.
+                f".st-key-citara-sidebar .st-key-citara-vertical-{value} button::before"
+                f"{{content:'{config.domain_letter}';}}"
+                f".st-key-citara-sidebar .st-key-citara-vertical-{value} button::after"
+                f"{{content:'{document_count_label(config, corpus_stats_for(value))}';}}"
+                f".st-key-citara-sidebar .st-key-citara-vertical-{value} button:hover"
+                f"{{border-color:{accent['line']};}}"
+            )
+            if value == selected:
+                # .domain-card.active — accent tint + border, chip flipped to
+                # solid accent. Hover/focus repeated so the generic hover never
+                # washes out the active card (same trick as the welcome).
+                # !important: the active state must win the specificity tie with
+                # the base [class*] rule regardless of <style> injection order.
+                card_css.append(
+                    f".st-key-citara-sidebar .st-key-citara-vertical-{value} button,"
+                    f".st-key-citara-sidebar .st-key-citara-vertical-{value} button:hover,"
+                    f".st-key-citara-sidebar .st-key-citara-vertical-{value} button:focus-visible,"
+                    f".st-key-citara-sidebar .st-key-citara-vertical-{value} button:active"
+                    f"{{background:{accent['tint']} !important; border-color:{accent['line']} !important; color:var(--text);}}"
+                    f".st-key-citara-sidebar .st-key-citara-vertical-{value} button::before"
+                    f"{{background:{accent['accent']} !important; color:{accent['on']} !important; border:none !important;}}"
+                )
+            st.button(
+                # Short name like the mock ("Normativa legal"), not the long
+                # display_name — same fail-safe fallback as the welcome cards.
+                config.domain_name or display_name,
+                key=f"citara-vertical-{value}",
+                width="stretch",
+                on_click=select_vertical,
+                args=(value,),
+            )
+        st.markdown(f"<style>{''.join(card_css)}</style>", unsafe_allow_html=True)
+        vertical_value = selected
+
+        # Corpus block (mock 02): status derived from document_count, not
+        # hardcoded (fail-safe: an empty corpus must not read "listo").
+        stats = corpus_stats_for(vertical_value)
+        chunks_fmt = f"{stats.chunk_count:,}".replace(",", " ")
+        docs_noun = "doc" if stats.document_count == 1 else "docs"
+        corpus_ready = stats.document_count > 0
         st.markdown(
-            '<div class="side-domain-meta">'
-            f"{escape(document_count_label(active_config, corpus_stats_for(vertical_value)))}"
+            '<div class="label side-section-label" style="padding-top:22px;">Corpus</div>'
+            '<div class="side-corpus">'
+            '<div class="side-corpus-status">'
+            f'<span class="dot {"dot-ok" if corpus_ready else "dot-neutral"}"></span>'
+            f'<span class="side-corpus-status-text">{"Corpus listo" if corpus_ready else "Corpus vacío"}</span></div>'
+            f'<div class="side-corpus-sub">{stats.document_count} {docs_noun} · {chunks_fmt} fragmentos</div>'
             "</div>",
             unsafe_allow_html=True,
         )
+        # Trigger only: the flag is consumed by render_corpus_dialog in main's
+        # render cycle, which opens the st.dialog over the page.
+        if st.button("Gestionar corpus ↓", key="citara-corpus-open"):
+            st.session_state[KEY_CORPUS_OPEN] = True
+
         st.markdown(
             '<div class="side-foot">Todo el procesamiento ocurre en tu equipo.</div>',
             unsafe_allow_html=True,

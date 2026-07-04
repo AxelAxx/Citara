@@ -32,7 +32,7 @@ from ui.components.chat_header import render_chat_header
 from ui.components.error_card import error_presentation, render_error_card
 from ui.components.sidebar import render_ollama_badge, render_sidebar
 from ui.layout import render_chat_area
-from ui.screens.corpus import render_corpus_panel
+from ui.screens.corpus import render_corpus_dialog
 from ui.screens.welcome import render_welcome
 from ui.state import (
     KEY_ENTERED,
@@ -177,9 +177,9 @@ def main() -> None:
     dependencies_ok = preflight_error is None
     render_ollama_badge(badge_slot, config, preflight_error)
 
-    # Read-only Corpus section under the header — real counts through the
-    # engine façade; presentation never touches ChromaDB (golden rule 1).
-    render_corpus_panel(engine, config)
+    # Corpus detail lives in a dialog now (mock 06 is its own screen, not chat
+    # body): opens only when the sidebar's "Gestionar corpus" set the flag.
+    render_corpus_dialog(engine, config)
 
     history = history_for(vertical_value)
 

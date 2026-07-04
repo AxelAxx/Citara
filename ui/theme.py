@@ -507,6 +507,17 @@ html, body, .stApp,
    Everything on the badge is REAL data (VerticalConfig + this run's preflight);
    it renders into a slot filled after _check_dependencies. Scoped under the
    keyed container so nothing leaks outside the sidebar. */
+/* The mock paints the sidebar on --bg2 so its --surface cards (badge, switcher,
+   corpus) contrast; Streamlit's secondaryBackgroundColor IS --surface (#16181E),
+   which flattens all three. Repainted here, scoped to the sidebar chrome, instead
+   of touching config.toml — the rest of the theme keeps the stock backgrounds. */
+[data-testid="stSidebar"], [data-testid="stSidebarContent"]{
+  background:var(--bg2);
+}
+/* The mock's 9px card rhythm: Streamlit's default stVerticalBlock gap (1rem) is
+   too airy between the switcher cards. Section separation survives on the 22px
+   padding-top the section labels carry. */
+.st-key-citara-sidebar [data-testid="stVerticalBlock"]{ gap:9px; }
 .st-key-citara-sidebar .side-brand{ display:flex; align-items:center; gap:11px; padding:0 4px 4px; }
 /* C¹ mark at the design's 38px (same pseudo-element monogram as the chat avatar;
    em math: C = .56em ⇒ 21px, ¹ ⇒ 7px) */
@@ -535,9 +546,49 @@ html, body, .stApp,
 .st-key-citara-sidebar .side-badge-local{ font-family:var(--font-mono); font-size:11px; color:var(--faint);
   border-top:1px solid var(--border); padding-top:8px; }
 .st-key-citara-sidebar .side-section-label{ padding:0 4px; }
-/* .domain-meta token under the switcher: the active Vertical's real doc count */
-.st-key-citara-sidebar .side-domain-meta{ font-family:var(--font-mono); font-size:10.5px;
-  color:var(--faint); padding:0 4px; }
+/* .domain-card (row variant, tokens from export/citara.css .domain-card/
+   .domain-letter/.domain-meta): chip left, name over meta right. Static
+   skeleton here; the letter, the meta (real doc count) and the active accent
+   flip are injected per-card in render_sidebar (same data-driven pattern as
+   the welcome cards). Grid rather than flex so the ::before chip can span both
+   text rows — pseudo-elements cannot be wrapped in a sub-container. */
+.st-key-citara-sidebar [class*="st-key-citara-vertical-"] button{
+  display:grid; grid-template-columns:30px 1fr; grid-template-rows:auto auto;
+  column-gap:11px; row-gap:1px; align-items:center; justify-items:start;
+  width:100%; min-height:0; text-align:left; padding:10px 12px;
+  background:var(--surface); border:1px solid var(--border); border-radius:11px;
+  color:var(--text);
+}
+/* .domain-letter chip — spans both rows; neutral until its card is active */
+.st-key-citara-sidebar [class*="st-key-citara-vertical-"] button::before{
+  grid-row:1 / span 2; width:30px; height:30px; border-radius:10px;
+  background:var(--surface2); color:var(--muted); border:1px solid var(--border);
+  font-family:var(--font-mono); font-size:13px; font-weight:600; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+}
+/* The button's ONLY direct child is a generic label-wrapper div (the markdown
+   container sits 3 levels deeper and never matches a > selector) — place THAT
+   div in the grid cell; "> div" avoids depending on the st-emotion-cache hash. */
+.st-key-citara-sidebar [class*="st-key-citara-vertical-"] button > div{
+  grid-column:2; grid-row:1;
+  display:flex; align-items:center; justify-content:flex-start;
+  text-align:left; width:100%; min-width:0; line-height:1.2;
+}
+.st-key-citara-sidebar [class*="st-key-citara-vertical-"] button p{
+  margin:0; text-align:left; font-size:13.5px; font-weight:600;  /* .domain-name */
+  line-height:1.2;
+}
+/* .domain-meta sub-label; content injected in render_sidebar */
+.st-key-citara-sidebar [class*="st-key-citara-vertical-"] button::after{
+  grid-column:2; grid-row:2; font-family:var(--font-mono); font-size:10.5px;
+  color:var(--faint); line-height:1.2;
+}
+/* Corpus status block (mock 02 sidebar), the .card formula on .side-corpus */
+.st-key-citara-sidebar .side-corpus{ background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-md); padding:12px 13px; }
+.st-key-citara-sidebar .side-corpus-status{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.st-key-citara-sidebar .side-corpus-status-text{ font-size:12.5px; font-weight:600; color:var(--text); }
+.st-key-citara-sidebar .side-corpus-sub{ font-family:var(--font-mono); font-size:10.5px; color:var(--muted); }
 .st-key-citara-sidebar .side-foot{ padding:14px 4px 0; border-top:1px solid var(--border);
   font-size:11px; color:var(--faint); line-height:1.5; }
 /* pin the foot-note to the sidebar bottom (.foot-note's margin-top:auto): the
@@ -561,6 +612,8 @@ html, body, .stApp,
 .st-key-citara-head .head-subtitle{ margin:0; font-size:14.5px; color:var(--muted);
   max-width:640px; line-height:1.5; }
 .st-key-citara-head .head-subtitle strong{ color:var(--text); font-weight:600; }
+/* mock 02 closes .main-head with a hairline under the whole header block */
+.st-key-citara-head{ padding-bottom:18px; border-bottom:1px solid var(--border); }
 
 /* ---- Chat input hint (tokens from citara.css .input-hint) ---------------------
    Flows as the LAST element, right above the pinned chat input: Streamlit's

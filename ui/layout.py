@@ -8,6 +8,8 @@ is step 5B, in theme.py, not in this move.
 
 from __future__ import annotations
 
+from html import escape
+
 import streamlit as st
 
 from core.engine import RagEngine
@@ -56,12 +58,23 @@ def _render_empty_state(config: VerticalConfig) -> None:
     vertical-specific hardcoded in presentation); a Vertical without them still
     gets the greeting, just with no suggestion list.
     """
+    # Mock 03 greeting is a fixed template interpolating domain_tagline — config
+    # DATA, not vertical branching (same criterion as the chat_input
+    # placeholder). An empty tagline degrades to the generic copy (fail-safe).
+    greeting = (
+        f"Pregúntame sobre {escape(config.domain_tagline)}. Respondo en español "
+        "y siempre cito la fuente exacta del documento."
+        if config.domain_tagline
+        else (
+            "Respondo en español basándome solo en los documentos cargados, "
+            "y cito la fuente exacta de cada afirmación."
+        )
+    )
     with st.container(key="citara-empty"):
         st.markdown(
             '<div class="empty-logo"></div>'
             '<div class="empty-title">Hola, soy Citara</div>'
-            '<p class="empty-sub">Respondo en español basándome solo en los documentos '
-            "cargados, y cito la fuente exacta de cada afirmación.</p>",
+            f'<p class="empty-sub">{greeting}</p>',
             unsafe_allow_html=True,
         )
         if not config.example_questions:

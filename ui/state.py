@@ -20,16 +20,18 @@ from core.ingest import load_vertical_config
 from core.models import RagEngineError, Vertical, VerticalConfig
 
 # --- session-state keys (the contract) ----------------------------------------
-# KEY_VERTICAL is the ONE source of truth for the active collection id. The sidebar
-# selectbox deliberately has its OWN widget key (KEY_VERTICAL_WIDGET) and syncs back
-# via sync_vertical — binding the widget directly to KEY_VERTICAL desyncs on the
-# widget's first mount (see the comment at the selectbox in main).
+# KEY_VERTICAL is the ONE source of truth for the active collection id. Both
+# switchers (welcome cards and sidebar cards) are buttons whose on_click
+# (select_vertical) writes it directly — buttons hold no value, so there is no
+# widget key and no sync callback.
 KEY_VERTICAL = "vertical"
-KEY_VERTICAL_WIDGET = "vertical_widget"
 KEY_ENTERED = "entered"
 KEY_PENDING_QUERY = "pending_query"
 KEY_HISTORIES = "histories"
 KEY_HAS_GENERATED = "has_generated"
+# Set by the sidebar's "Gestionar corpus" trigger; consumed (one-shot) by
+# render_corpus_dialog, which opens the corpus st.dialog.
+KEY_CORPUS_OPEN = "corpus_open"
 
 
 def config_for(collection_id: str) -> VerticalConfig:
@@ -88,24 +90,13 @@ def queue_query(question: str) -> None:
 
 
 def select_vertical(vertical_value: str) -> None:
-    """on_click of a welcome domain card: select the Vertical, stay on the welcome.
+    """on_click of a domain card (welcome or sidebar): select the Vertical.
 
     Writes the flat KEY_VERTICAL state — the ONE source of truth for the active
-    Vertical, which the sidebar switcher seeds from and syncs back to (see
-    sync_vertical). Selecting is deliberately NOT entering — that is
+    Vertical. On the welcome, selecting is deliberately NOT entering — that is
     "Comenzar"'s job (enter_chat).
     """
     st.session_state[KEY_VERTICAL] = vertical_value
-
-
-def sync_vertical() -> None:
-    """on_change of the sidebar switcher: copy the widget value to KEY_VERTICAL.
-
-    The widget key and the flat key are deliberately separate — binding the
-    widget directly to KEY_VERTICAL desyncs on first mount (see the comment at
-    the selectbox in main).
-    """
-    st.session_state[KEY_VERTICAL] = st.session_state[KEY_VERTICAL_WIDGET]
 
 
 def enter_chat() -> None:
