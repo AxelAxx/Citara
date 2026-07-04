@@ -96,19 +96,25 @@ retrieval returns) and streams text after — so the SSE event order mirrors tha
    event: citations
    data: {"citations": [{"document_id":"BOE-A-2015-11430","page":12,"section":"Art. 38","chunk_text":"..."}], "is_abstention": false}
    ```
-   - `is_abstention` is derivable here: `citations == []` ⇒ the engine took the
-     empty-context path (abstention). The front uses this to render the calm abstention
-     pill instead of a sources panel.
+   - `is_abstention` here reflects ONLY the hard path (`citations == []`). It is an early
+     hint, NOT the final decision — the authoritative resolution arrives in `done` (soft
+     abstention is only detectable after the full text is known).
 2. `event: token` — repeated, one per text fragment from `text_stream`.
    ```
    event: token
    data: {"text": "Según"}
    ```
-3. `event: done` — once, terminates the stream.
+3. `event: done` — once, authoritative resolution (was `{}`).
    ```
    event: done
-   data: {}
+   data: {"is_abstention": true, "suppress_citations": true}
    ```
+   The server accumulates the full text during the stream and resolves abstention at close
+   with the SAME criterion the Streamlit `layout` used
+   (`not citations or full_text.strip().startswith(ABSTENTION_TEXT)`). The client renders
+   tokens as they arrive, then on `done`: if `is_abstention` → show the abstention pill and
+   DISCARD the sources panel (even if the `citations` event carried noise citations);
+   otherwise render the sources normally. `suppress_citations == is_abstention`.
 4. `event: error` — if generation fails mid-stream (Ollama drops). Carries the actionable
    message; the front clears the loading state and shows the error card.
    ```
@@ -121,10 +127,20 @@ trivial to proxy, and matches `answer_stream`'s pull model. FastAPI `StreamingRe
 wraps the generator directly. (Mid-stream cancellation — user hits stop — is a v2 concern;
 for the MVP the client just drops the connection.)
 
-**Abstention path:** when context is insufficient, `answer_stream` yields the whole
-abstention sentence as one fragment and `citations` is empty — no LLM call. Over SSE that
-is simply: `citations` event with `is_abstention: true`, one `token` event with the
-abstention text, then `done`. No special client code.
+#### Hard vs soft abstention (why `done` is authoritative)
+
+- **Hard abstention:** retrieval returned empty context → `citations == []` → the engine
+  yields the abstention sentence whole, no LLM call. Detectable in the `citations` event.
+  Rare with a real ingested corpus.
+- **Soft abstention:** vector search ALWAYS returns top-k neighbours, so with a populated
+  corpus retrieval is practically never empty — the hard guard rarely fires. Instead the
+  LLM declines in prose with `ABSTENTION_TEXT` while carrying noise citations. This is the
+  common case and is ONLY detectable after the full text is known.
+
+The resolution lives server-side in the `api/` SSE adapter (mirroring where it lived in the
+Streamlit `layout` — Presentation, not Domain). `core/` is untouched; `api/` reuses
+`core.generate.ABSTENTION_TEXT` (single source of truth). The client never replicates
+domain heuristics — it consumes the resolved `done` decision.
 
 ### `GET /api/verticals/{id}/sources/{document_id}?page={n}`  *(v2 — source viewer, mock 09)*
 Returns the `chunk_text` provenance for the source viewer drawer. Deferred: the honest

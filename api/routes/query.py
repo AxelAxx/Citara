@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 
+from core.generate import ABSTENTION_TEXT
 from core.models import RagEngineError
 
 from api.dependencies import get_engine
@@ -31,8 +32,10 @@ def query(vertical_id: str, body: QueryRequest) -> EventSourceResponse:
     def events() -> Iterator[dict]:
         # citations FIRST (fixed the instant retrieval returned): the front
         # reserves the sources/abstention slot before any text arrives — the
-        # same ordering app.py's label_slot relied on. Empty citations ⇔ the
-        # engine took the empty-context abstention path (API_CONTRACT.md).
+        # same ordering app.py's label_slot relied on. Its is_abstention only
+        # covers the EARLY hard path (empty context ⇒ no citations); the done
+        # event below is the authoritative resolution, because the soft
+        # abstention is only detectable once the full text is known.
         yield {
             "event": "citations",
             "data": json.dumps(
@@ -43,8 +46,10 @@ def query(vertical_id: str, body: QueryRequest) -> EventSourceResponse:
                 ensure_ascii=False,
             ),
         }
+        full_text = ""
         try:
             for fragment in streamed.text_stream:
+                full_text += fragment
                 yield {
                     "event": "token",
                     "data": json.dumps({"text": fragment}, ensure_ascii=False),
@@ -61,6 +66,21 @@ def query(vertical_id: str, body: QueryRequest) -> EventSourceResponse:
                 ),
             }
             return
-        yield {"event": "done", "data": json.dumps({})}
+        # Authoritative abstention resolution, mirror of the Streamlit layout's
+        # _is_abstention_text: hard path (no citations) OR soft path (the LLM
+        # declined in prose despite noisy retrieved context — vector search
+        # always returns top-k neighbours, so the hard guard rarely fires on an
+        # ingested corpus). suppress_citations tells the front to drop the
+        # sources panel: sources under "I can't find this" would contradict the
+        # answer (same rule that builds Answer.abstention in the Streamlit UI).
+        is_abstention = not streamed.citations or full_text.strip().startswith(
+            ABSTENTION_TEXT
+        )
+        yield {
+            "event": "done",
+            "data": json.dumps(
+                {"is_abstention": is_abstention, "suppress_citations": is_abstention}
+            ),
+        }
 
     return EventSourceResponse(events())
