@@ -374,13 +374,19 @@ html, body, .stApp,
   /* offset = 60px header + the 3.5rem/1rem page padding set below (~9rem) */
   min-height:calc(100vh - 9rem); display:flex; flex-direction:column;
   justify-content:center; align-items:center;
-  --logo-size:clamp(84px, 11vh, 138px);
-  background:radial-gradient(120% 80% at 50% 38%, var(--accent-tint), transparent 55%); }
+  --logo-size:clamp(84px, 11vh, 138px); }
 /* Streamlit's page container pads ~6rem top — at 768px tall that alone pushes
    the CTA below the fold. Reclaim it ONLY while the welcome is on the page
    (:has), so the chat keeps the stock padding. 3.5rem still clears the header. */
 .stApp:has(.st-key-citara-welcome) [data-testid="stMainBlockContainer"]{
   padding-top:3.5rem; padding-bottom:1rem; }
+/* Ambient glow belongs on the full-viewport app background, not the content
+   box: painted on .st-key-citara-welcome it clips at the container edges and
+   reads as a rectangle. Scoped with :has() so only the welcome is tinted; the
+   chat keeps the stock flat background. Layered over --bg (mirrors the native
+   backgroundColor) so the transparent stop fades to the real page color. */
+.stApp:has(.st-key-citara-welcome){
+  background:radial-gradient(120% 80% at 50% 38%, var(--accent-tint), transparent 55%), var(--bg); }
 /* Compact the container's own vertical rhythm: Streamlit's default 1rem gap ×4
    element slots is pure air here; halving it buys ~32px at 768px. */
 .st-key-citara-welcome [data-testid="stVerticalBlock"]{ gap:0.4rem; }
