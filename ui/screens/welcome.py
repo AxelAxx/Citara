@@ -1,42 +1,17 @@
 """Welcome / entry screen (mock 01): brand, domain cards, two-step Comenzar.
 
-Extracted from app.py as V2 step 4 — verbatim except _vertical_options, whose
-enum iteration became the documented BYOD seam. The corpus-stat helpers the
-cards share with the sidebar live in ui.components.corpus_meta (V2 step 6b-1).
+Extracted from app.py as V2 step 4. Pure rendering: the options come in by
+parameter (produced by ui.state.vertical_options) and the corpus-stat helpers
+the cards share with the sidebar live in ui.components.corpus_meta (V2 6b-1).
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-from core.models import RagEngineError, Vertical
 from ui.components.corpus_meta import corpus_stats_for, document_count_label
 from ui.state import KEY_VERTICAL, config_for, enter_chat, select_vertical
 from ui.theme import accent_for
-
-
-@st.cache_data(show_spinner=False)
-def _vertical_options() -> list[tuple[str, str]]:
-    """The selectable Verticals as (value, display_name), skipping any unconfigured.
-
-    Cached as data because it is just a cheap read of small YAML files; building the
-    option list once per session is enough.
-    """
-    # BYOD seam: the ONE place that decides WHICH collections exist. Today the
-    # available collections are exactly the configured Vertical enum values; in
-    # V3 this line will list the user's runtime-created Collections instead.
-    # Everything downstream (cards, switcher, routing) iterates the returned
-    # options and hardcodes neither the count nor the ids.
-    available_collection_ids = [vertical.value for vertical in Vertical]
-
-    options: list[tuple[str, str]] = []
-    for collection_id in available_collection_ids:
-        try:
-            config = config_for(collection_id)
-        except RagEngineError:
-            continue  # a collection with no/invalid YAML simply isn't offered
-        options.append((collection_id, config.display_name))
-    return options
 
 
 def render_welcome(options: list[tuple[str, str]]) -> None:

@@ -32,14 +32,7 @@ from ui.components.error_card import error_presentation, render_error_card
 from ui.components.sidebar import render_ollama_badge
 from ui.layout import render_chat_area
 from ui.screens.corpus import render_corpus_panel
-
-# welcome's options producer stays welcome-private: main borrows it only until
-# the routing moves in V2 step 6b-2 (provisional cross-module private import,
-# same criterion as above).
-from ui.screens.welcome import (
-    _vertical_options,
-    render_welcome,
-)
+from ui.screens.welcome import render_welcome
 from ui.state import (
     KEY_ENTERED,
     KEY_VERTICAL,
@@ -47,6 +40,7 @@ from ui.state import (
     config_for,
     history_for,
     sync_vertical,
+    vertical_options,
 )
 from ui.theme import LOGO_PATH, inject_theme, render_splash
 
@@ -117,7 +111,7 @@ def main() -> None:
         with st.sidebar:
             st.image(str(LOGO_PATH), width=40)
 
-    options = _vertical_options()
+    options = vertical_options()
     if not options:
         # No Vertical yet, so no accent to pick — inject the base theme (default
         # legal accent) just so this card renders styled.
