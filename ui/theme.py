@@ -364,7 +364,7 @@ html, body, .stApp,
    Two-step entry: a .domain-card per Vertical SELECTS (active = accent tint +
    border, the mock's .domain-card.active); the primary "Comenzar" button ENTERS.
    Cards and CTA are st.button widgets; the letter chip and the sub-label are
-   pseudo-elements whose content/colors are injected per-card in _render_welcome
+   pseudo-elements whose content/colors are injected per-card in render_welcome
    (button labels are plain markdown — they cannot nest styled children). */
 /* Fill the viewport minus Streamlit's header/body chrome and center vertically,
    so the CTA is visible with NO scroll on a ~768px-tall screen. --logo-size is
@@ -432,13 +432,13 @@ html, body, .stApp,
 }
 .st-key-citara-welcome [data-testid="stButton"] > button::before{
   /* .domain-letter chip — neutral until its card is active; the content and the
-     active accent flip are injected per-card in _render_welcome */
+     active accent flip are injected per-card in render_welcome */
   width:30px; height:30px; border-radius:var(--r-sm); display:flex; align-items:center;
   justify-content:center; font-family:var(--font-mono); font-size:13px; font-weight:600;
   background:var(--surface2); color:var(--muted); border:1px solid var(--border);
 }
 .st-key-citara-welcome [data-testid="stButton"] > button::after{
-  /* .domain-meta sub-label; content injected in _render_welcome */
+  /* .domain-meta sub-label; content injected in render_welcome */
   font-family:var(--font-mono); font-size:10.5px; color:var(--faint); text-align:left;
 }
 .st-key-citara-welcome [data-testid="stButton"] > button:hover,
@@ -447,7 +447,7 @@ html, body, .stApp,
   background:var(--surface2); color:var(--text);
 }
 /* .btn-primary "Comenzar" CTA — shape only; its colors follow the SELECTED
-   Vertical and are injected in _render_welcome. Placed after the card rules so
+   Vertical and are injected in render_welcome. Placed after the card rules so
    its equal-specificity overrides (row layout, no chip) win the source-order tie. */
 .st-key-citara-welcome .st-key-citara-comenzar{ max-width:540px; margin:0 auto; }
 .st-key-citara-welcome .st-key-citara-comenzar button{

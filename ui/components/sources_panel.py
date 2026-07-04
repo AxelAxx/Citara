@@ -1,6 +1,6 @@
 """SourcesPanel + abstention rendering (FR8/FR9, AC2/AC3).
 
-Extracted verbatim from app.py (V2 step 3).
+Extracted from app.py (V2 step 3).
 """
 
 from __future__ import annotations
