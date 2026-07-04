@@ -1,19 +1,16 @@
 """Welcome / entry screen (mock 01): brand, domain cards, two-step Comenzar.
 
 Extracted from app.py as V2 step 4 — verbatim except _vertical_options, whose
-enum iteration became the documented BYOD seam. Also owns the two cached
-corpus-stat helpers the welcome cards AND the sidebar share (the sidebar
-reuses "the same cached route and same format as the welcome cards, so the
-two can never diverge"); app.py imports them privately until the sidebar
-itself moves (provisional, same criterion as _is_abstention_text).
+enum iteration became the documented BYOD seam. The corpus-stat helpers the
+cards share with the sidebar live in ui.components.corpus_meta (V2 step 6b-1).
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-from core.engine import RagEngine
-from core.models import CorpusStats, RagEngineError, Vertical, VerticalConfig
+from core.models import RagEngineError, Vertical
+from ui.components.corpus_meta import corpus_stats_for, document_count_label
 from ui.state import KEY_VERTICAL, config_for, enter_chat, select_vertical
 from ui.theme import accent_for
 
@@ -40,31 +37,6 @@ def _vertical_options() -> list[tuple[str, str]]:
             continue  # a collection with no/invalid YAML simply isn't offered
         options.append((collection_id, config.display_name))
     return options
-
-
-@st.cache_data(show_spinner=False)
-def _corpus_stats_for(vertical_value: str) -> CorpusStats:
-    """Cached Corpus snapshot per Vertical — the ONE route welcome AND sidebar use.
-
-    Goes through the LIGHT engine façade (VectorStore only): the welcome needs
-    counts for BOTH Verticals, and building full engines there would trigger the
-    LLM warm-up (~6s each) before the user even picked one. cache_data, not
-    resource: a small immutable value object; the Corpus only changes via the
-    offline ingest CLI, so reruns can reuse it (the same staleness trade-off
-    _load_engine already accepts).
-    """
-    return RagEngine.corpus_stats_for(config_for(vertical_value))
-
-
-def _document_count_label(config: VerticalConfig, stats: CorpusStats) -> str:
-    """"{domain_sublabel} · {n} documento(s)" — the ONE format welcome and sidebar share.
-
-    The count is the REAL one from CorpusStats (the mock's "14 documentos" was a
-    placeholder); an empty sublabel degrades to the bare count (fail-safe).
-    """
-    noun = "documento" if stats.document_count == 1 else "documentos"
-    count = f"{stats.document_count} {noun}"
-    return f"{config.domain_sublabel} · {count}" if config.domain_sublabel else count
 
 
 def render_welcome(options: list[tuple[str, str]]) -> None:
@@ -111,7 +83,7 @@ def render_welcome(options: list[tuple[str, str]]) -> None:
                 f".st-key-citara-welcome .st-key-citara-domain-{value} button::before"
                 f"{{content:'{config.domain_letter}';}}"
                 f".st-key-citara-welcome .st-key-citara-domain-{value} button::after"
-                f"{{content:'{_document_count_label(config, _corpus_stats_for(value))}';}}"
+                f"{{content:'{document_count_label(config, corpus_stats_for(value))}';}}"
                 f".st-key-citara-welcome .st-key-citara-domain-{value} button:hover"
                 f"{{border-color:{accent['line']};}}"
             )

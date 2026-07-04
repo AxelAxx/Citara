@@ -27,17 +27,16 @@ from core.models import (
 
 # error_presentation is shared public API: the boot/preflight cards here and the
 # query path in ui/layout.py map errors through the same function.
+from ui.components.corpus_meta import corpus_stats_for, document_count_label
 from ui.components.error_card import error_presentation, render_error_card
 from ui.components.sidebar import render_ollama_badge
 from ui.layout import render_chat_area
 from ui.screens.corpus import render_corpus_panel
 
-# welcome's options producer and cached corpus-stat helpers stay welcome-private:
-# main borrows them only until the sidebar/routing move in V2 steps 5-6
-# (provisional cross-module private imports, same criterion as above).
+# welcome's options producer stays welcome-private: main borrows it only until
+# the routing moves in V2 step 6b-2 (provisional cross-module private import,
+# same criterion as above).
 from ui.screens.welcome import (
-    _corpus_stats_for,
-    _document_count_label,
     _vertical_options,
     render_welcome,
 )
@@ -188,7 +187,7 @@ def main() -> None:
         active_config = config_for(vertical_value)
         st.markdown(
             '<div class="side-domain-meta">'
-            f"{escape(_document_count_label(active_config, _corpus_stats_for(vertical_value)))}"
+            f"{escape(document_count_label(active_config, corpus_stats_for(vertical_value)))}"
             "</div>",
             unsafe_allow_html=True,
         )
