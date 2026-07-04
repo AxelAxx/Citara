@@ -22,7 +22,6 @@ from ui.components.loading_card import (
     spinner_until_first_token,
 )
 from ui.components.sources_panel import (
-    _is_abstention_text,  # private import, provisional (single consumer: _handle_query)
     render_abstention_label,
     render_sources_panel,
 )
@@ -79,6 +78,18 @@ def _render_empty_state(config: VerticalConfig) -> None:
                 on_click=queue_query,
                 args=(question,),
             )
+
+
+def _is_abstention_text(text: str) -> bool:
+    """Detect an abstention answered in prose.
+
+    The deterministic empty-context guard yields ``ABSTENTION_TEXT`` whole, but
+    the LLM can also open with that same sentence when the retrieved chunks don't
+    actually answer the question. Both cases must get the calm abstention
+    treatment — and an answer that says "I can't find this" must not dangle a
+    contradictory sources list underneath.
+    """
+    return text.strip().startswith(ABSTENTION_TEXT)
 
 
 def render_chat_area(
