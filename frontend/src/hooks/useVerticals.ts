@@ -4,8 +4,9 @@ import type { VerticalView } from '../api/client'
 
 export interface VerticalCorpus {
   view: VerticalView
-  /** Real ingested-document count from /corpus — mock numbers never ship. */
+  /** Real ingested-corpus stats from /corpus — mock numbers never ship. */
   documentCount: number
+  chunkCount: number
 }
 
 interface UseVerticalsResult {
@@ -33,10 +34,14 @@ export function useVerticals(): UseVerticalsResult {
       try {
         const views = await getVerticals()
         const loaded = await Promise.all(
-          views.map(async (view) => ({
-            view,
-            documentCount: (await getCorpus(view.id)).document_count,
-          })),
+          views.map(async (view) => {
+            const stats = await getCorpus(view.id)
+            return {
+              view,
+              documentCount: stats.document_count,
+              chunkCount: stats.chunk_count,
+            }
+          }),
         )
         if (!cancelled) setVerticals(loaded)
       } catch (err) {

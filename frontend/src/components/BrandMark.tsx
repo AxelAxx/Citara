@@ -36,6 +36,9 @@ export function BrandMark({ size = 138 }: BrandMarkProps) {
           fill="var(--accent-tint, rgba(124,156,255,0.13))"
         />
       </g>
+      {/* non-scaling-stroke: a viewBox-scaled stroke thins to ~0.3px at the
+          38px sidebar size and vanishes — the mock frames the tile with a
+          constant 1px border at every size. */}
       <rect
         x="1"
         y="1"
@@ -45,7 +48,8 @@ export function BrandMark({ size = 138 }: BrandMarkProps) {
         ry="66.56"
         fill="none"
         stroke="var(--accent-line, rgba(124,156,255,0.36))"
-        strokeWidth="2"
+        strokeWidth="1"
+        vectorEffect="non-scaling-stroke"
       />
 
       <path

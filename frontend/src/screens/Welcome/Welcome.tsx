@@ -5,9 +5,7 @@ import { DomainCard } from '../../components/DomainCard'
 import { PrivacyPill } from '../../components/PrivacyPill'
 import type { VerticalCorpus } from '../../hooks/useVerticals'
 import { asVerticalId, setAccent } from '../../theme/accent'
-
-// UI release label, not API data — bump by hand alongside releases.
-const CITARA_VERSION = '0.4'
+import { CITARA_VERSION } from '../../version'
 
 export interface WelcomeProps {
   /** Fired by the CTA; the chat screen wires real routing here later. */
@@ -87,6 +85,7 @@ export function Welcome({ onEnter, verticals, error, health }: WelcomeProps) {
             {verticals.map((v) => (
               <DomainCard
                 key={v.view.id}
+                variant="column"
                 letter={v.view.domain_letter}
                 name={v.view.domain_name}
                 meta={`${v.view.domain_sublabel} · ${v.documentCount} ${
