@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
+import type { Health } from '../../api/client'
 import { BrandMark } from '../../components/BrandMark'
 import { DomainCard } from '../../components/DomainCard'
 import { PrivacyPill } from '../../components/PrivacyPill'
-import { useHealth } from '../../hooks/useHealth'
-import { useVerticals } from '../../hooks/useVerticals'
+import type { VerticalCorpus } from '../../hooks/useVerticals'
 import { asVerticalId, setAccent } from '../../theme/accent'
 
 // UI release label, not API data — bump by hand alongside releases.
@@ -12,17 +12,20 @@ const CITARA_VERSION = '0.4'
 export interface WelcomeProps {
   /** Fired by the CTA; the chat screen wires real routing here later. */
   onEnter: (verticalId: string) => void
+  /** Preloaded by App during the splash — already settled when this mounts. */
+  verticals: VerticalCorpus[]
+  error: string | null
+  /** May still be in flight (slow Ollama preflight); the pill fills in late. */
+  health: Health | null
 }
 
 /**
- * Welcome / domain-choice screen (mock: Citara_Bienvenida). Orchestration
- * only: data comes from the hooks, rendering from the dumb components. The
- * mock's numbers ("14 documentos", "llama3.1") are placeholders — the corpus
- * counts and LLM model shown here are live API values.
+ * Welcome / domain-choice screen (mock: Citara_Bienvenida). Presentational
+ * orchestration: App owns the data hooks and hands the results in as props,
+ * so no loading state exists here. The mock's numbers ("14 documentos",
+ * "llama3.1") are placeholders — corpus counts and LLM model are live values.
  */
-export function Welcome({ onEnter }: WelcomeProps) {
-  const { verticals, loading, error } = useVerticals()
-  const { health } = useHealth()
+export function Welcome({ onEnter, verticals, error, health }: WelcomeProps) {
   const [pickedId, setPickedId] = useState<string | null>(null)
 
   // Derived, not synced: "first vertical until the user picks" needs no
@@ -78,10 +81,6 @@ export function Welcome({ onEnter }: WelcomeProps) {
         {error ? (
           <div className="mb-[26px] rounded-md border border-warn-line bg-warn-tint p-4 text-left font-mono text-xs text-warn">
             {error}
-          </div>
-        ) : loading ? (
-          <div className="mb-[26px] p-4 font-mono text-xs text-faint">
-            Cargando dominios…
           </div>
         ) : (
           <div className="mb-[26px] grid grid-cols-2 gap-3">

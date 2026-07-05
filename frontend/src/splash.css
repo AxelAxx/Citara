@@ -1,0 +1,68 @@
+/* Boot splash — 1:1 port of the Streamlit splash (ui/theme.py, itself ported
+   from export/screens/00-splash-animated.html). The whole timeline is pure
+   CSS: each element animates on its own delay, and the root's citaraSplashOut
+   holds ~2.6s then fades out; Splash.tsx listens for that animation's end to
+   hand off to the Welcome. Plain CSS rather than Tailwind so the keyframe
+   timeline stays line-diffable against the Streamlit source. */
+.citara-splash{
+  position:fixed; inset:0; width:100vw; height:100vh;
+  z-index:2147483647; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  /* Block interaction while visible; visibility:hidden at the end of the fade
+     releases the overlay even before React unmounts it. */
+  pointer-events:auto;
+  background:radial-gradient(120% 70% at 50% 42%, var(--accent-tint), transparent 60%), var(--bg2);
+  animation:citaraSplashOut 3.2s ease forwards;
+}
+.citara-splash .sp-top{ position:absolute; top:26px; left:0; right:0; display:flex; justify-content:center;
+  animation:spFade .9s ease-out both; }
+.citara-splash .sp-badge{ display:inline-flex; align-items:center; gap:8px; padding:6px 13px; border-radius:999px;
+  background:var(--surface); border:1px solid var(--border); }
+/* The Streamlit build reused global .dot/.mono helpers here; the front scopes
+   them to the splash instead of growing global classes. */
+.citara-splash .sp-dot{ width:7px; height:7px; border-radius:50%; background:var(--ok);
+  box-shadow:0 0 0 3px rgba(70,207,166,0.18); }
+.citara-splash .sp-badge-text{ font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:11px; color:var(--muted); }
+.citara-splash .sp-logo{ position:relative; width:132px; height:132px; display:flex; align-items:center; justify-content:center; }
+.citara-splash .sp-halo{ position:absolute; inset:-30px; border-radius:50%;
+  background:radial-gradient(circle, var(--accent-line), transparent 68%); filter:blur(4px);
+  animation:spHalo 1s ease-out .05s both; }
+.citara-splash .sp-tile{ position:relative; width:132px; height:132px; border-radius:34px;
+  background:var(--accent-tint); border:1px solid var(--accent-line);
+  display:flex; align-items:center; justify-content:center; overflow:hidden;
+  animation:spTile .9s cubic-bezier(.2,.7,.2,1) .15s both; }
+.citara-splash .sp-sweep{ position:absolute; top:0; left:0; width:40%; height:100%;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent);
+  animation:spSweep 1.1s ease-in-out 1.15s both; }
+.citara-splash .sp-mark{ position:relative; display:inline-block; font-family:'IBM Plex Serif',Georgia,serif; font-weight:600;
+  font-size:76px; line-height:1; letter-spacing:-.02em; color:var(--text); }
+.citara-splash .sp-cee{ display:inline-block; animation:spC .6s ease-out .5s both; }
+.citara-splash .sp-one{ position:absolute; top:.02em; right:-.30em; display:inline-block; font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-weight:600; font-size:.30em; color:var(--accent); animation:spOne .6s cubic-bezier(.3,1.4,.4,1) .95s both; }
+.citara-splash .sp-word{ margin-top:30px; font-family:'IBM Plex Serif',Georgia,serif; font-weight:600; font-size:38px;
+  letter-spacing:-.01em; color:var(--text); animation:spWord .8s cubic-bezier(.2,.7,.2,1) 1.15s both; }
+.citara-splash .sp-rule{ width:46px; height:2px; margin-top:16px; border-radius:2px;
+  background:linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation:spRule .7s ease-out 1.5s both; }
+.citara-splash .sp-tag{ margin-top:16px; font-size:14px; color:var(--muted); text-align:center; max-width:280px;
+  line-height:1.5; animation:spFade .8s ease-out 1.7s both; }
+.citara-splash .sp-bottom{ position:absolute; bottom:30px; left:0; right:0; display:flex; flex-direction:column;
+  align-items:center; gap:14px; animation:spFade .9s ease-out 2.0s both; }
+.citara-splash .sp-dots{ display:flex; gap:5px; }
+.citara-splash .sp-dots span{ width:7px; height:7px; border-radius:50%; background:var(--accent); animation:spDot 1.4s ease-in-out infinite; }
+.citara-splash .sp-dots span:nth-child(2){ animation-delay:.2s; }
+.citara-splash .sp-dots span:nth-child(3){ animation-delay:.4s; }
+
+@keyframes spHalo{ 0%{opacity:0; transform:scale(.6);} 45%{opacity:1;} 100%{opacity:.9; transform:scale(1);} }
+@keyframes spTile{ 0%{opacity:0; transform:translateY(14px) scale(.82);} 60%{opacity:1; transform:translateY(0) scale(1.04);} 100%{opacity:1; transform:translateY(0) scale(1);} }
+@keyframes spC{ 0%{opacity:0; transform:translateY(6px);} 100%{opacity:1; transform:translateY(0);} }
+@keyframes spOne{ 0%{opacity:0; transform:translateY(-4px) scale(.4);} 70%{opacity:1; transform:translateY(0) scale(1.25);} 100%{opacity:1; transform:translateY(0) scale(1);} }
+@keyframes spWord{ 0%{opacity:0; transform:translateY(10px); letter-spacing:.18em;} 100%{opacity:1; transform:translateY(0); letter-spacing:-.01em;} }
+@keyframes spFade{ 0%{opacity:0; transform:translateY(8px);} 100%{opacity:1; transform:translateY(0);} }
+@keyframes spRule{ 0%{transform:scaleX(0); opacity:0;} 100%{transform:scaleX(1); opacity:1;} }
+@keyframes spSweep{ 0%{transform:translateX(-130%) skewX(-18deg);} 100%{transform:translateX(230%) skewX(-18deg);} }
+@keyframes spDot{ 0%,100%{opacity:.3;} 50%{opacity:1;} }
+/* Hold the splash, then fade out. visibility:hidden (special-cased to flip only
+   at the end) drops it out of the way — no pointer-events in keyframes, since
+   Chromium would apply a keyframe-only discrete value for the whole animation. */
+@keyframes citaraSplashOut{ 0%,80%{ opacity:1; } 100%{ opacity:0; visibility:hidden; } }
