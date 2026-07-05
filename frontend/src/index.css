@@ -1,0 +1,36 @@
+/* IBM Plex — the same @import the Streamlit theme used. Must precede @tailwind. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens (export/citara.css). The --accent* quartet defaults to the
+   LEGAL palette; the app swaps these four vars on :root per active vertical at
+   runtime — the exact pattern ui/theme.py's inject_theme used in Streamlit.
+   (salud: accent #46CFA6, on #06120D, tint rgba(70,207,166,.13),
+   line rgba(70,207,166,.36)) */
+:root {
+  --bg: #101115;
+  --bg2: #0c0d10;
+  --surface: #16181e;
+  --surface2: #1c1f27;
+  --elevated: #222631;
+  --border: #282c36;
+  --border-strong: #373c49;
+  --text: #eceef2;
+  --muted: #9ca0ab;
+  --faint: #686c77;
+  --ok: #46cfa6;
+  --warn: #e6a95c;
+  --warn-tint: rgba(230, 169, 92, 0.13);
+  --warn-line: rgba(230, 169, 92, 0.38);
+  --accent: #7c9cff;
+  --accent-on: #0c0d10;
+  --accent-tint: rgba(124, 156, 255, 0.13);
+  --accent-line: rgba(124, 156, 255, 0.36);
+}
+
+body {
+  @apply bg-bg font-sans text-text antialiased;
+}

@@ -39,6 +39,11 @@ data/**/*.xml
 # --- Tiktoken / model caches (if redirected into the project) ---
 .tiktoken_cache/
 
+# --- Frontend (Vite/React) ---
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
 # --- Design scaffolding (reference only, not the product) ---
 # The export/ folder is design hand-off material (Claude Design mockups, CSS,
 # screenshots), not shippable code. Anchored to the repo root so ONLY this folder
