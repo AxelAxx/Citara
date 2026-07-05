@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ChatHeader } from '../../components/chat/ChatHeader'
+import { EmptyState } from '../../components/chat/EmptyState'
 import { Sidebar } from '../../components/Sidebar/Sidebar'
 import { useHealth } from '../../hooks/useHealth'
 import { useVerticals } from '../../hooks/useVerticals'
@@ -47,6 +48,8 @@ export function Chat({ verticalId }: ChatProps) {
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
   >(null)
+  // Suggestion picks land here until the real composer (step 3) consumes them.
+  const [draft, setDraft] = useState('')
 
   const selected = verticals.find((v) => v.view.id === activeId) ?? null
   // Default to the newest conversation until one is explicitly picked.
@@ -91,22 +94,26 @@ export function Chat({ verticalId }: ChatProps) {
           />
         )}
 
-        <div className="flex-1 overflow-y-auto px-[34px] py-[26px]">
+        {/* Always the empty state in this step; the message list replaces it
+            in step 3 when a conversation has messages. */}
+        <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-10 py-12">
           {error ? (
-            <div className="mx-auto max-w-[640px] rounded-md border border-warn-line bg-warn-tint p-4 font-mono text-xs text-warn">
+            <div className="w-full max-w-[640px] rounded-md border border-warn-line bg-warn-tint p-4 font-mono text-xs text-warn">
               {error}
             </div>
           ) : (
-            /* Placeholder: empty state + message list arrive in steps 2/3. */
-            <div className="mx-auto max-w-[760px] p-4 text-center font-mono text-xs text-faint">
-              chat body — paso 2/3
-            </div>
+            selected && (
+              <EmptyState
+                suggestions={selected.view.example_questions}
+                onSelect={setDraft}
+              />
+            )
           )}
         </div>
 
-        {/* Placeholder: the composer arrives in step 3. */}
+        {/* Placeholder: the composer arrives in step 3; it will consume draft. */}
         <div className="border-t border-border px-[34px] py-4 text-center font-mono text-xs text-faint">
-          input — paso 3
+          {draft || 'input — paso 3'}
         </div>
       </main>
     </div>
