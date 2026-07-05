@@ -16,11 +16,26 @@ interface UseVerticalsResult {
 }
 
 /**
- * Load the configured Verticals plus each one's live corpus stats. Any
- * failure (API down, empty corpus, store unreachable) surfaces as `error`
- * instead of a partial list — a card with a made-up count would hide the
- * actual problem (fail fast, loud).
+ * One fetch plan shared by this hook and the warm-up gate (useEngineReady):
+ * every Vertical plus its live corpus stats, corpus calls in parallel. Any
+ * failure rejects the whole load — a card with a made-up count would hide
+ * the actual problem (fail fast, loud).
  */
+export async function loadVerticalCorpora(): Promise<VerticalCorpus[]> {
+  const views = await getVerticals()
+  return Promise.all(
+    views.map(async (view) => {
+      const stats = await getCorpus(view.id)
+      return {
+        view,
+        documentCount: stats.document_count,
+        chunkCount: stats.chunk_count,
+      }
+    }),
+  )
+}
+
+/** React-state wrapper over loadVerticalCorpora for screens that mount cold. */
 export function useVerticals(): UseVerticalsResult {
   const [verticals, setVerticals] = useState<VerticalCorpus[]>([])
   const [loading, setLoading] = useState(true)
@@ -32,17 +47,7 @@ export function useVerticals(): UseVerticalsResult {
     let cancelled = false
     ;(async () => {
       try {
-        const views = await getVerticals()
-        const loaded = await Promise.all(
-          views.map(async (view) => {
-            const stats = await getCorpus(view.id)
-            return {
-              view,
-              documentCount: stats.document_count,
-              chunkCount: stats.chunk_count,
-            }
-          }),
-        )
+        const loaded = await loadVerticalCorpora()
         if (!cancelled) setVerticals(loaded)
       } catch (err) {
         if (!cancelled)

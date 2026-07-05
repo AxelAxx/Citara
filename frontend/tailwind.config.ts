@@ -56,11 +56,18 @@ export default {
           '0%,100%': { opacity: '.55' },
           '50%': { opacity: '1' },
         },
+        'citara-float': {
+          '0%,100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-7px)' },
+        },
       },
       animation: {
         'citara-dots': 'citara-dots 1.2s infinite',
         'citara-shimmer': 'citara-shimmer 1.6s linear infinite',
         'citara-pulse': 'citara-pulse 1.4s ease-in-out infinite',
+        'citara-float': 'citara-float 2.6s ease-in-out infinite',
+        // Tailwind's own spin is 1s; the mock's spinner turns at .8s.
+        'citara-spin': 'spin 0.8s linear infinite',
       },
     },
   },

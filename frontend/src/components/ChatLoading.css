@@ -1,0 +1,18 @@
+/* ChatLoading spinner, plain CSS on purpose: the animate-* utilities live in
+   tailwind.config.ts and a stale dev server once served the page without them
+   (frozen spinner). A handwritten rule imported by the component can't be
+   JIT-purged or lost to a config reload. Unique keyframes name: @keyframes
+   are page-global and a generic "spin" could collide. */
+.citara-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: citaraSpin 0.8s linear infinite;
+}
+@keyframes citaraSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}

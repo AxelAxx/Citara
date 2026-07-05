@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
+import type { Health } from '../../api/client'
 import { ChatHeader } from '../../components/chat/ChatHeader'
 import { ChatInput } from '../../components/chat/ChatInput'
 import { EmptyState } from '../../components/chat/EmptyState'
 import { Message } from '../../components/chat/Message'
 import { Sidebar } from '../../components/Sidebar/Sidebar'
 import { useChat } from '../../hooks/useChat'
-import { useHealth } from '../../hooks/useHealth'
-import { useVerticals } from '../../hooks/useVerticals'
+import type { VerticalCorpus } from '../../hooks/useVerticals'
 import { asVerticalId, setAccent } from '../../theme/accent'
 
 export interface ChatProps {
   /** The Vertical chosen on the Welcome; the switcher can change it later. */
   verticalId: string
+  /** Preloaded by the warm-up gate — Chat never fetches, so the header,
+      sidebar and empty-state all paint on the first frame. */
+  verticals: VerticalCorpus[]
+  health: Health
 }
 
 /**
@@ -40,9 +44,7 @@ function newConversation(): Conversation {
  * Orchestration only — useChat isolates the SSE, the components render.
  * Suggestion picks and the composer both funnel into the same send().
  */
-export function Chat({ verticalId }: ChatProps) {
-  const { verticals, error } = useVerticals()
-  const { health } = useHealth()
+export function Chat({ verticalId, verticals, health }: ChatProps) {
   const [activeId, setActiveId] = useState(verticalId)
   const { messages, send, isStreaming } = useChat(activeId)
   const [conversations, setConversations] = useState<Conversation[]>(() => [
@@ -98,23 +100,17 @@ export function Chat({ verticalId }: ChatProps) {
             domainName={selected.view.domain_name}
             tagline={selected.view.domain_tagline}
             documentCount={selected.documentCount}
-            model={health?.ok ? health.llm_model : '—'}
+            model={health.ok ? health.llm_model : '—'}
           />
         )}
 
         {messages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-10 py-12">
-            {error ? (
-              <div className="w-full max-w-[640px] rounded-md border border-warn-line bg-warn-tint p-4 font-mono text-xs text-warn">
-                {error}
-              </div>
-            ) : (
-              selected && (
-                <EmptyState
-                  suggestions={selected.view.example_questions}
-                  onSelect={send}
-                />
-              )
+            {selected && (
+              <EmptyState
+                suggestions={selected.view.example_questions}
+                onSelect={send}
+              />
             )}
           </div>
         ) : (
