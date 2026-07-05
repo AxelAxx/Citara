@@ -12,8 +12,14 @@ document corpus — no domain logic changes. Demonstrates Clean Architecture, RA
 abstention (no hallucinated answers), and a fully local/private stack.
 
 ## Stack
-Ollama (Qwen2.5 7B) · BGE-M3 embeddings · ChromaDB · LangChain · Streamlit · pymupdf4llm.
-See [`DECISIONS.md`](./DECISIONS.md) for the why (and licensing notes).
+**Core:** Ollama (Qwen2.5 7B) · BGE-M3 embeddings · ChromaDB · LangChain · pymupdf4llm.
+**Presentation:** FastAPI (HTTP adapter over the `core/` façade) + React + Vite + Tailwind.
+See [`docs/DECISIONS.md`](./docs/DECISIONS.md) for the why (incl. the Streamlit→React
+migration and licensing notes) and [`docs/API_CONTRACT.md`](./docs/API_CONTRACT.md) for the
+HTTP frontier.
+
+> The original Streamlit UI (`app.py`, `ui/`) is frozen as a safety net during the
+> migration and removed once the React app is complete.
 
 ## Quickstart
 ```bash
@@ -21,18 +27,40 @@ See [`DECISIONS.md`](./DECISIONS.md) for the why (and licensing notes).
 ollama pull qwen2.5:7b
 ollama pull bge-m3
 
-# 2. env
-python -m venv .venv && source .venv/bin/activate
+# 2. python env + deps
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\Activate
 pip install -r requirements.txt
 
-# 3. add PDFs to data/health/ (e.g. GuíaSalud) and/or data/legal/ (e.g. BOE)
+# 3. frontend deps (one-time)
+cd frontend && npm install && cd ..
 
-# 4. ingest a vertical
+# 4. add PDFs to data/health/ (e.g. GuíaSalud) and/or data/legal/ (e.g. BOE)
+
+# 5. ingest a vertical (offline CLI — not the UI)
 python -m core.ingest --vertical health
-
-# 5. run
-streamlit run app.py
 ```
+
+### Run (two processes, local)
+Ollama must be running (`ollama serve`). Then, in **two terminals**:
+```bash
+# Terminal 1 — backend API (FastAPI over core/)
+uvicorn api.main:app --reload --port 8000        # http://localhost:8000  (/docs for Swagger)
+
+# Terminal 2 — frontend (Vite dev server) — MUST run inside frontend/
+cd frontend && npm run dev                       # http://localhost:5173
+```
+Open **http://localhost:5173**. The frontend proxies `/api` to the backend on :8000.
+
+> `npm run dev` fails from the repo root (`ENOENT ... package.json`) — the frontend's
+> `package.json` lives in `frontend/`. Always `cd frontend` first.
+
+<details>
+<summary>Legacy: run the frozen Streamlit V1</summary>
+
+```bash
+streamlit run app.py                             # V1, removed once the React app is done
+```
+</details>
 
 ## Docs
 - [`docs/SPEC.md`](./docs/SPEC.md) — requirements, architecture, acceptance criteria.
