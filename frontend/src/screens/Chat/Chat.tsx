@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChatHeader } from '../../components/chat/ChatHeader'
+import { ChatInput } from '../../components/chat/ChatInput'
 import { EmptyState } from '../../components/chat/EmptyState'
+import { Message } from '../../components/chat/Message'
 import { Sidebar } from '../../components/Sidebar/Sidebar'
+import { useChat } from '../../hooks/useChat'
 import { useHealth } from '../../hooks/useHealth'
 import { useVerticals } from '../../hooks/useVerticals'
 import { asVerticalId, setAccent } from '../../theme/accent'
@@ -33,23 +36,22 @@ function newConversation(): Conversation {
 }
 
 /**
- * Chat screen shell (mock: Citara-Empty-Chat / sidebar.html), step 1 of 4:
- * sidebar + header — message list and composer land in the next steps, so
- * the chat area is an explicit placeholder. Orchestration: hooks feed the
- * Sidebar and ChatHeader; switching domain re-themes via setAccent.
+ * Chat screen (mocks: empty-1b / chat-1b), step 3a: functional streaming.
+ * Orchestration only — useChat isolates the SSE, the components render.
+ * Suggestion picks and the composer both funnel into the same send().
  */
 export function Chat({ verticalId }: ChatProps) {
   const { verticals, error } = useVerticals()
   const { health } = useHealth()
   const [activeId, setActiveId] = useState(verticalId)
+  const { messages, send, isStreaming } = useChat(activeId)
   const [conversations, setConversations] = useState<Conversation[]>(() => [
     newConversation(),
   ])
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
   >(null)
-  // Suggestion picks land here until the real composer (step 3) consumes them.
-  const [draft, setDraft] = useState('')
+  const bottomRef = useRef<HTMLDivElement | null>(null)
 
   const selected = verticals.find((v) => v.view.id === activeId) ?? null
   // Default to the newest conversation until one is explicitly picked.
@@ -62,6 +64,12 @@ export function Chat({ verticalId }: ChatProps) {
   useEffect(() => {
     setAccent(asVerticalId(activeId))
   }, [activeId])
+
+  // Fires on every token batch too, so the newest text stays in view while
+  // the answer types itself out.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'end' })
+  }, [messages])
 
   const startConversation = () => {
     const conversation = newConversation()
@@ -94,27 +102,41 @@ export function Chat({ verticalId }: ChatProps) {
           />
         )}
 
-        {/* Always the empty state in this step; the message list replaces it
-            in step 3 when a conversation has messages. */}
-        <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-10 py-12">
-          {error ? (
-            <div className="w-full max-w-[640px] rounded-md border border-warn-line bg-warn-tint p-4 font-mono text-xs text-warn">
-              {error}
+        {messages.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-10 py-12">
+            {error ? (
+              <div className="w-full max-w-[640px] rounded-md border border-warn-line bg-warn-tint p-4 font-mono text-xs text-warn">
+                {error}
+              </div>
+            ) : (
+              selected && (
+                <EmptyState
+                  suggestions={selected.view.example_questions}
+                  onSelect={send}
+                />
+              )
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto px-[34px] py-8">
+            <div className="mx-auto flex w-full max-w-[760px] flex-col gap-[26px]">
+              {messages.map((message, index) => (
+                <Message key={index} message={message} />
+              ))}
+              <div ref={bottomRef} />
             </div>
-          ) : (
-            selected && (
-              <EmptyState
-                suggestions={selected.view.example_questions}
-                onSelect={setDraft}
-              />
-            )
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Placeholder: the composer arrives in step 3; it will consume draft. */}
-        <div className="border-t border-border px-[34px] py-4 text-center font-mono text-xs text-faint">
-          {draft || 'input — paso 3'}
-        </div>
+        <ChatInput
+          onSubmit={send}
+          disabled={isStreaming}
+          placeholder={
+            selected
+              ? `Escribe tu pregunta sobre ${selected.view.domain_name.toLowerCase()}…`
+              : 'Escribe tu pregunta…'
+          }
+        />
       </main>
     </div>
   )

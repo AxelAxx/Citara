@@ -41,6 +41,27 @@ export default {
         card: '11px', // .domain-card / suggestion rows
         tile: '34px', // the C¹ splash/loading tile
       },
+      // Loading-state keyframes verbatim from export/citara.css (mock 04).
+      // citara- prefix: generic names could collide with Tailwind's built-ins.
+      keyframes: {
+        'citara-dots': {
+          '0%,80%,100%': { opacity: '.25', transform: 'translateY(0)' },
+          '40%': { opacity: '1', transform: 'translateY(-2px)' },
+        },
+        'citara-shimmer': {
+          '0%': { backgroundPosition: '200% 0' },
+          '100%': { backgroundPosition: '-200% 0' },
+        },
+        'citara-pulse': {
+          '0%,100%': { opacity: '.55' },
+          '50%': { opacity: '1' },
+        },
+      },
+      animation: {
+        'citara-dots': 'citara-dots 1.2s infinite',
+        'citara-shimmer': 'citara-shimmer 1.6s linear infinite',
+        'citara-pulse': 'citara-pulse 1.4s ease-in-out infinite',
+      },
     },
   },
   plugins: [],
