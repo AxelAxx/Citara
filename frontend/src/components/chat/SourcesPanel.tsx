@@ -1,21 +1,54 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Citation } from '../../api/client'
+import { CiteChip } from './CiteChip'
+
+/** A cite-chip click asking to reveal source n; key bumps per click so
+    re-clicking the same chip re-triggers the effect. */
+export interface SourceFocus {
+  n: number
+  key: number
+}
 
 /**
  * Collapsible "Fuentes citadas" panel under an answer (mock chat-1b.html).
  * Presentational: renders whatever citations it is handed, numbered in
- * arrival order (the same order the ¹ markers will use in step 3b). The
- * "Abrir fragmento" source viewer (mock 09) is deliberately deferred — the
- * snippet shows chunk_text inline.
+ * arrival order (the same order the inline ¹ chips use). The "Abrir
+ * fragmento" source viewer (mock 09) is deliberately deferred — the snippet
+ * shows chunk_text inline.
  */
 export interface SourcesPanelProps {
   citations: Citation[]
+  /** Anchor namespace for the cite→source ids (src-<msgId>-<n>). */
+  msgId?: string
+  /** Inline chip click: unfold, scroll to and flash card n. */
+  focus?: SourceFocus | null
 }
 
-export function SourcesPanel({ citations }: SourcesPanelProps) {
+export function SourcesPanel({ citations, msgId, focus }: SourcesPanelProps) {
   // Folded by default: the count badge advertises the evidence without
   // pushing a wall of snippets between consecutive answers.
   const [open, setOpen] = useState(false)
+  const [flashN, setFlashN] = useState<number | null>(null)
+  const cardRefs = useRef(new Map<number, HTMLDivElement>())
+
+  useEffect(() => {
+    if (!focus) return
+    setOpen(true)
+    setFlashN(focus.n)
+    // One frame so the card exists when the panel was folded until now.
+    const frame = requestAnimationFrame(() => {
+      // block:'nearest' only moves the chat column — the app root is
+      // h-screen/overflow-hidden, so no global page scroll can happen.
+      cardRefs.current
+        .get(focus.n)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+    const timer = window.setTimeout(() => setFlashN(null), 1200)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
+    }
+  }, [focus])
 
   return (
     <div className="mt-[14px] rounded-[14px] border border-border bg-surface px-[14px] py-[13px]">
@@ -49,10 +82,21 @@ export function SourcesPanel({ citations }: SourcesPanelProps) {
           {citations.map((citation, index) => (
             <div
               key={`${citation.document_id}-${citation.page}-${index}`}
-              className="flex gap-[13px] rounded-card border border-border bg-bg px-[14px] py-[13px] transition-all hover:border-accent-line hover:bg-surface2"
+              id={msgId ? `src-${msgId}-${index + 1}` : undefined}
+              ref={(el) => {
+                if (el) cardRefs.current.set(index + 1, el)
+                else cardRefs.current.delete(index + 1)
+              }}
+              className={`flex gap-[13px] rounded-card border bg-bg px-[14px] py-[13px] transition-all hover:border-accent-line hover:bg-surface2 ${
+                flashN === index + 1
+                  ? 'border-accent-line bg-surface2 ring-1 ring-[var(--accent-line)]'
+                  : 'border-border'
+              }`}
             >
-              <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] border border-accent-line bg-accent-tint font-mono text-xs font-semibold text-accent">
-                {index + 1}
+              {/* Same chip the ¹ markers will use inline (3b) — numbering by
+                  arrival order stays the single link between both places. */}
+              <div className="shrink-0">
+                <CiteChip n={index + 1} variant="card" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
