@@ -14,8 +14,18 @@ from __future__ import annotations
 import pytest
 
 from core.engine import RagEngine, StreamedAnswer
-from core.generate import ABSTENTION_TEXT
-from core.models import Answer, Chunk, ChunkMetadata, Citation, Query, Vertical, VerticalConfig
+from core.generate import ABSTENTION_TEXT, iter_answer_parts
+from core.models import (
+    Answer,
+    Chunk,
+    ChunkMetadata,
+    Citation,
+    CitePart,
+    Query,
+    TextPart,
+    Vertical,
+    VerticalConfig,
+)
 
 
 class _FakeRetriever:
@@ -49,6 +59,15 @@ class _FakeGenerator:
             yield ABSTENTION_TEXT
             return
         yield from self._fragments
+
+    def generate_stream_parts(self, query, context):
+        # Delegate through the REAL incremental parser so engine tests exercise
+        # the same fragments→parts contract production uses; laziness is
+        # preserved because both wrapped functions are generators.
+        return iter_answer_parts(
+            self.generate_stream(query, context),
+            len(self._citations) if context else 0,
+        )
 
     def citations_for_context(self, context):
         # Citations derive from context: none when there is nothing to ground on.
@@ -258,6 +277,27 @@ def test_answer_stream_empty_context_abstains_with_no_citations():
     # and no LLM fragments used.
     assert list(streamed.text_stream) == [ABSTENTION_TEXT]
     assert streamed.citations == []
+
+
+def test_answer_stream_part_stream_emits_citepart_when_marker_closes():
+    context = [Chunk(text="t", metadata=ChunkMetadata(document_id="doc", page=1))]
+    citation = Citation(document_id="doc", page=1)
+    generator = _FakeGenerator(
+        _answer_with_citation(),
+        # The "[1]" arrives split across three fragments — the streaming parser
+        # must hold it back and resolve it whole, never leak "[" as text.
+        fragments=["Un mes [", "1", "]", " y nada más."],
+        citations=[citation],
+    )
+    engine = RagEngine(
+        retriever=_FakeRetriever(context), generator=generator, top_k=5
+    )
+
+    parts = list(engine.answer_stream("¿plazo?").part_stream)
+
+    assert CitePart(n=1) in parts
+    text = "".join(p.text for p in parts if isinstance(p, TextPart))
+    assert text == "Un mes  y nada más."  # marker text never leaks into TextParts
 
 
 # --- corpus_stats façade (FR-#06): delegates, never counts ---------------------

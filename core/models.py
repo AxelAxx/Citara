@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -137,6 +138,45 @@ class Citation(BaseModel):
         return base.model_copy(update={"chunk_text": chunk.text})
 
 
+class TextPart(BaseModel):
+    """A run of plain Answer text between inline citation markers.
+
+    One arm of the :data:`AnswerPart` union. Carries no provenance on purpose:
+    provenance lives only in :class:`CitePart`, so a renderer can never cite
+    from the wrong arm.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["text"] = "text"
+    text: str
+
+
+class CitePart(BaseModel):
+    """An inline citation marker resolved to ONLY its 1-based citation index.
+
+    Deliberately decoupled from :class:`Citation`: the part carries just ``n``
+    and the renderer resolves ``n → Answer.citations[n - 1]`` positionally, so
+    the citation payload is never duplicated inline (one source of truth: the
+    ``citations`` list). Built ONLY by the marker parser + remap in
+    ``core.generate`` after validating against the real citation list — a
+    CitePart indexing an invented source cannot reach an Answer (its validator
+    enforces the range again).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["cite"] = "cite"
+    n: int
+
+
+# The typed pieces an Answer's text splits into once its inline [N] markers are
+# parsed: plain text runs interleaved with resolved citation markers. A
+# discriminated union on ``kind`` so (de)serialization stays unambiguous when
+# the API layer ships parts over the wire later.
+AnswerPart = Annotated[TextPart | CitePart, Field(discriminator="kind")]
+
+
 class Answer(BaseModel):
     """Generator output: the response text plus the Citations it is grounded on.
 
@@ -152,6 +192,11 @@ class Answer(BaseModel):
     text: str
     citations: list[Citation] = []
     is_abstention: bool = False
+    # The parsed view of ``text``: TextPart runs interleaved with CitePart
+    # markers. Additive on purpose — ``text`` stays the plain reply so existing
+    # consumers keep working; ``parts`` serves renderers that place citation
+    # chips inline (FR9 / 3b). Empty ⇒ no parsed view was produced.
+    parts: list[AnswerPart] = []
 
     @model_validator(mode="after")
     def _require_grounding(self) -> Answer:
@@ -163,6 +208,23 @@ class Answer(BaseModel):
                 "Either attach the Citations it is grounded on, or build an "
                 "Answer.abstention(...) when RetrievedContext is insufficient."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _parts_grounded_in_citations(self) -> Answer:
+        # A CitePart whose n falls outside the citations list would render a
+        # chip that resolves to nothing (the front looks up citations[n - 1]) —
+        # the same "uncited claim" defect rule 3 exists to prevent, typed away.
+        # This also keeps abstentions honest: with citations empty, ANY
+        # CitePart is out of range, so an abstention can never carry cites.
+        for part in self.parts:
+            if isinstance(part, CitePart) and not (1 <= part.n <= len(self.citations)):
+                raise ValueError(
+                    "Answer.parts contains a CitePart whose n does not index "
+                    "Answer.citations (1-based). Build parts through "
+                    "core.generate (parse_citations + the Generator's fragment "
+                    "remap) from the same citation list the Answer carries."
+                )
         return self
 
     @classmethod

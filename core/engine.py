@@ -27,7 +27,9 @@ from core.generate import Generator
 from core.ingest import load_vertical_config
 from core.models import (
     Answer,
+    AnswerPart,
     Citation,
+    CitePart,
     CorpusStats,
     Query,
     RagEngineError,
@@ -40,18 +42,48 @@ from core.store import VectorStore
 
 @dataclass(frozen=True)
 class StreamedAnswer:
-    """The streaming counterpart of an :class:`Answer`: text arrives incrementally,
-    Citations are known up front.
+    """The streaming counterpart of an :class:`Answer`: content arrives
+    incrementally, Citations are known up front.
 
-    ``text_stream`` yields the reply fragments as the LLM emits them (or the whole
-    abstention sentence in one piece when there was nothing to ground on).
-    ``citations`` are derived from the retrieved context the moment retrieval returns
-    — they do not change token-by-token — so the SourcesPanel renders from the same
-    provenance the non-streaming :meth:`RagEngine.answer` would carry.
+    ``part_stream`` is the primary stream (3b): TextParts as the LLM emits text,
+    plus a CitePart the instant a complete inline ``[N]`` marker closes.
+    ``citations`` are derived from the retrieved context the moment retrieval
+    returns — they do not change token-by-token — so the SourcesPanel renders
+    from the same provenance the non-streaming :meth:`RagEngine.answer` carries.
+
+    ``text_stream`` remains for plain-text consumers as a DERIVED view (see the
+    property below), so nothing that renders raw text had to change.
+
+    Trade-off, stated loudly: both attributes wrap the SAME single-use LLM
+    stream. Consume exactly ONE of them, exactly once — handing out two live
+    iterators would require either a second LLM call or buffering the whole
+    reply, both worse than this rule.
     """
 
-    text_stream: Iterator[str]
+    part_stream: Iterator[AnswerPart]
     citations: list[Citation]
+
+    @property
+    def text_stream(self) -> Iterator[str]:
+        """Compatibility view: the reply as plain text fragments.
+
+        TextParts pass through; a validated marker is re-rendered as its
+        literal ``[n]``. Two deliberate deviations from the raw LLM text: (1)
+        markers dropped as invalid never re-appear — a cleanup, they had no
+        source behind them; (2) ``n`` is the remapped citations-list index, so
+        under dedup the digits may differ from what the LLM typed — but they
+        now agree with the SourcesPanel ordering, which is what a reader cross-
+        references.
+        """
+        return _plain_text_view(self.part_stream)
+
+
+def _plain_text_view(parts: Iterator[AnswerPart]) -> Iterator[str]:
+    for part in parts:
+        if isinstance(part, CitePart):
+            yield f"[{part.n}]"
+        elif part.text:
+            yield part.text
 
 
 class RagEngine:
@@ -170,10 +202,10 @@ class RagEngine:
             query = Query(text=query)
 
         context = self._retriever.retrieve(query, top_k=self._top_k, where=where)
-        # Citations are fixed the instant retrieval returns; only the text streams.
-        text_stream = self._generator.generate_stream(query, context)
+        # Citations are fixed the instant retrieval returns; only content streams.
+        part_stream = self._generator.generate_stream_parts(query, context)
         citations = self._generator.citations_for_context(context)
-        return StreamedAnswer(text_stream=text_stream, citations=citations)
+        return StreamedAnswer(part_stream=part_stream, citations=citations)
 
     def warm_up(self) -> None:
         """Preload the LLM into VRAM before the first Query (latency optimization).

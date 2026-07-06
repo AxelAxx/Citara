@@ -34,17 +34,21 @@ Zero vertical logic here: every legal/health difference lives in the
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+import re
+from collections.abc import Iterable, Iterator
 
 from core.embed import _model_is_available  # shared model-match rule; keep one source
 from core.models import (
     Answer,
+    AnswerPart,
     Citation,
+    CitePart,
     ModelNotPulledError,
     OllamaUnreachableError,
     Query,
     RagEngineError,
     RetrievedContext,
+    TextPart,
 )
 
 # Same rationale as the Embedder preflight: long enough for a cold local server,
@@ -62,6 +66,150 @@ _DEFAULT_TEMPERATURE = 0.1
 # The Abstention text (Spanish — this is end-user UI content, FR8/G5). Centralized
 # so the deterministic guard and any future LLM-side abstention read identically.
 ABSTENTION_TEXT = "No encuentro esto en los documentos proporcionados."
+
+# Inline citation markers exactly as the SystemPrompt instructs the model to
+# emit them: "[N]", N being the 1-based fragment number _format_block puts in
+# front of every context block. The YAML prompt and this regex MUST stay in
+# sync — both live on the "[N]" notation.
+_MARKER_RE = re.compile(r"\[(\d+)\]")
+
+# The exact "[N]" placeholder from the SystemPrompt instructions. The 7B model
+# sometimes echoes it verbatim instead of substituting a real number — that is
+# template garbage, not prose the user should read, so it is DROPPED whole
+# (the same fate as an out-of-range marker) instead of being left inline.
+_TEMPLATE_LITERAL = "[N]"
+
+# A "[" followed by up to this many digits — or the "N" of the echoed template
+# — could still close into something we must resolve, and is worth withholding
+# while streaming. Real fragment numbers are top_k-sized (single digits), so
+# anything longer stops being buffered and flushes as plain text — the cap
+# exists so a pathological digit run can't buffer unboundedly.
+_MARKER_PREFIX_RE = re.compile(r"\[(?:\d{0,6}|N)")
+
+
+# --- inline citation markers → AnswerParts (FR9 / 3b) --------------------------
+
+
+def parse_citations(text: str, num_citations: int) -> list[AnswerPart]:
+    """Split LLM text with inline ``[N]`` markers into typed AnswerParts.
+
+    ``num_citations`` is the count marker numbers are validated against —
+    whatever indexing the caller's text uses. The Generator parses with the
+    *fragment* count (the prompt numbers fragments 1..len(context)) and then
+    remaps every n to its 1-based position in the deduped ``Answer.citations``
+    (see ``_fragment_index_to_citation_index``), because a CitePart's ``n``
+    must resolve positionally against the citations list the renderer holds.
+
+    Validation is fail-fast by dropping: the 7B model echoes the context's
+    [N]-numbered blocks and may emit malformed or out-of-range markers ([7]
+    with 5 fragments, [0], "[12" never closed) — and sometimes the "[N]"
+    template placeholder itself, verbatim. A marker with no real fragment
+    behind it is an LLM error, not a citation — rendering it would show a chip
+    that opens nothing — so we validate every N against the real citation
+    count and drop invalid markers (and the echoed placeholder) cleanly rather
+    than propagate broken cites. Anything else in brackets ("[a]", an unclosed
+    "[12") is NOT marker-shaped and stays as literal text.
+
+    One algorithm with the streaming path: this is :func:`iter_answer_parts`
+    over a single fragment, plus merging of adjacent TextParts (a dropped
+    marker leaves its two text neighbours split in the incremental view).
+    """
+    return _merge_adjacent_text(list(iter_answer_parts([text], num_citations)))
+
+
+def iter_answer_parts(
+    fragments: Iterable[str], num_citations: int
+) -> Iterator[AnswerPart]:
+    """Streaming marker parser: text fragments in, AnswerParts out.
+
+    A ``[N]`` can arrive split across LLM tokens ("[", "2", "]"), so plain text
+    is emitted as soon as it provably contains no marker, while a trailing
+    prefix that could still become one ("[", "[12") is withheld until it either
+    closes (→ CitePart), proves to be plain text, or the stream ends — an
+    unclosed "[12" at end of stream flushes as text, exactly what the
+    non-streaming regex would have left alone.
+    """
+    pending = ""
+    for fragment in fragments:
+        pending += fragment
+        emitted, pending = _drain_pending(pending, num_citations, stream_open=True)
+        yield from emitted
+    emitted, _ = _drain_pending(pending, num_citations, stream_open=False)
+    yield from emitted
+
+
+def _drain_pending(
+    pending: str, num_citations: int, *, stream_open: bool
+) -> tuple[list[AnswerPart], str]:
+    """Consume ``pending`` into parts; return what must stay buffered.
+
+    Only a suffix that could still become a marker survives in the buffer, and
+    only while the stream is open — everything else is resolved now.
+    """
+    parts: list[AnswerPart] = []
+    while pending:
+        bracket = pending.find("[")
+        if bracket == -1:
+            parts.append(TextPart(text=pending))
+            pending = ""
+            break
+        if bracket > 0:
+            parts.append(TextPart(text=pending[:bracket]))
+            pending = pending[bracket:]
+
+        match = _MARKER_RE.match(pending)
+        if match:
+            n = int(match.group(1))
+            # Out-of-range N = LLM error, not a citation (see parse_citations):
+            # the marker is dropped whole. In range, it resolves 1-based.
+            if 1 <= n <= num_citations:
+                parts.append(CitePart(n=n))
+            pending = pending[match.end() :]
+            continue
+
+        if pending.startswith(_TEMPLATE_LITERAL):
+            # Echoed prompt placeholder, dropped whole (see _TEMPLATE_LITERAL).
+            pending = pending[len(_TEMPLATE_LITERAL) :]
+            continue
+
+        if stream_open and _MARKER_PREFIX_RE.fullmatch(pending):
+            # Could still close into a marker (or the "[N]" template) — hold it
+            # back for the next fragment.
+            break
+
+        # Provably not a marker (or the stream is over): the "[" was plain
+        # text. Emit it and keep scanning what follows for later markers.
+        parts.append(TextPart(text="["))
+        pending = pending[1:]
+    return parts, pending
+
+
+def _merge_adjacent_text(parts: list[AnswerPart]) -> list[AnswerPart]:
+    """Collapse consecutive TextParts (dropped markers leave split neighbours)."""
+    merged: list[AnswerPart] = []
+    for part in parts:
+        if merged and isinstance(part, TextPart) and isinstance(merged[-1], TextPart):
+            merged[-1] = TextPart(text=merged[-1].text + part.text)
+        else:
+            merged.append(part)
+    return merged
+
+
+def _remap_cite_indexes(
+    parts: Iterable[AnswerPart], fragment_to_citation: list[int]
+) -> Iterator[AnswerPart]:
+    """Rewrite each CitePart's fragment number as its citation-list index.
+
+    ``fragment_to_citation[i]`` is the 1-based citations index for fragment
+    ``i+1`` (see ``Generator._fragment_index_to_citation_index``). The parser
+    already guaranteed 1 <= n <= len(fragment_to_citation), so the lookup can't
+    miss. Lazy on purpose: streaming callers remap part-by-part as they emit.
+    """
+    for part in parts:
+        if isinstance(part, CitePart):
+            yield CitePart(n=fragment_to_citation[part.n - 1])
+        else:
+            yield part
 
 
 class Generator:
@@ -106,7 +254,21 @@ class Generator:
         # honest set of sources consulted. The Answer invariant then forbids a
         # non-abstaining Answer with no citations, so grounding can't silently slip.
         citations = self._citations_from_context(context)
-        return Answer(text=text, citations=citations)
+        # parts: the same text split for inline chips. ``text`` stays the raw
+        # reply (markers included) so plain consumers lose nothing. Markers are
+        # parsed against the FRAGMENT count and then remapped to citation
+        # indexes — validating against len(citations) directly would misindex
+        # (or wrongly drop) markers whenever two chunks shared (doc, page).
+        fragment_to_citation = self._fragment_index_to_citation_index(
+            context, citations
+        )
+        parts = list(
+            _remap_cite_indexes(
+                parse_citations(text, num_citations=len(context)),
+                fragment_to_citation,
+            )
+        )
+        return Answer(text=text, citations=citations, parts=parts)
 
     def generate_stream(self, query: Query, context: RetrievedContext) -> Iterator[str]:
         """Stream the grounded reply as text fragments, yielded as the LLM emits them.
@@ -133,6 +295,28 @@ class Generator:
         # first yield, so an unreachable Ollama raises OllamaUnreachableError on the
         # first iteration — before any generated text reaches the caller.
         yield from self._invoke_llm_stream(prompt)
+
+    def generate_stream_parts(
+        self, query: Query, context: RetrievedContext
+    ) -> Iterator[AnswerPart]:
+        """Streaming twin of :meth:`generate` at AnswerPart granularity (3b).
+
+        Wraps :meth:`generate_stream` — whose plain ``Iterator[str]`` contract
+        stays untouched for text-only consumers — with the incremental marker
+        parser: TextParts flow through as the LLM emits them; a CitePart is
+        emitted the moment its complete ``[N]`` closes. The abstention path
+        needs no special-casing: an empty context streams the abstention
+        sentence (no markers) as plain text, and the zero fragment count makes
+        any stray marker unresolvable anyway.
+        """
+        citations = self._citations_from_context(context)
+        fragment_to_citation = self._fragment_index_to_citation_index(
+            context, citations
+        )
+        yield from _remap_cite_indexes(
+            iter_answer_parts(self.generate_stream(query, context), len(context)),
+            fragment_to_citation,
+        )
 
     def citations_for_context(self, context: RetrievedContext) -> list[Citation]:
         """Public seam to derive the Citations behind a context (FR9 / AC2).
@@ -196,6 +380,28 @@ class Generator:
             seen.add(key)
             citations.append(Citation.from_chunk(chunk))
         return citations
+
+    @staticmethod
+    def _fragment_index_to_citation_index(
+        context: RetrievedContext, citations: list[Citation]
+    ) -> list[int]:
+        """Remap table: prompt fragment ``[i+1]`` → 1-based index in ``citations``.
+
+        The prompt numbers fragments 1..len(context), one per chunk
+        (``_format_block``), but ``citations`` is deduped by (document_id, page)
+        — two different indexings, so a fragment number used directly against
+        the citations list would misindex whenever two chunks share a page.
+        Each fragment resolves through its (doc, page) key to the POSITION of
+        its deduped Citation, which is exactly the ``n`` a CitePart must carry:
+        the renderer looks up ``Answer.citations[n - 1]``.
+        """
+        position = {
+            (c.document_id, c.page): index for index, c in enumerate(citations, 1)
+        }
+        return [
+            position[(chunk.metadata.document_id, chunk.metadata.page)]
+            for chunk in context
+        ]
 
     # --- LLM call (FR7) + preflight (AC7) ------------------------------------
 

@@ -13,15 +13,23 @@ import json
 
 import pytest
 
-from core.generate import Generator, ABSTENTION_TEXT
+from core.generate import (
+    ABSTENTION_TEXT,
+    Generator,
+    iter_answer_parts,
+    parse_citations,
+)
 from core.models import (
     Answer,
     Chunk,
     ChunkMetadata,
+    Citation,
+    CitePart,
     ModelNotPulledError,
     OllamaUnreachableError,
     Query,
     RagEngineError,
+    TextPart,
     Vertical,
 )
 
@@ -261,6 +269,145 @@ def test_generate_raises_on_missing_message_content(monkeypatch):
 
     with pytest.raises(RagEngineError):
         _make_generator().generate(Query(text="x"), context=[_chunk("doc", 1)])
+
+
+# --- FR9 / 3b: inline [N] markers → AnswerParts --------------------------------
+
+
+def test_parse_citations_valid_markers_build_parts():
+    parts = parse_citations("Un mes [1]. Quince días [2].", num_citations=2)
+
+    assert parts == [
+        TextPart(text="Un mes "),
+        CitePart(n=1),
+        TextPart(text=". Quince días "),
+        CitePart(n=2),
+        TextPart(text="."),
+    ]
+
+
+def test_parse_citations_out_of_range_marker_is_dropped():
+    # [7] has no fragment behind it — an LLM error, not a citation. It is
+    # scrubbed whole and its text neighbours merge back together.
+    parts = parse_citations("Cierto [1]. Inventado [7]. Fin.", num_citations=1)
+
+    assert parts == [
+        TextPart(text="Cierto "),
+        CitePart(n=1),
+        TextPart(text=". Inventado . Fin."),
+    ]
+    # [0] is equally out of range (1-based): it must never slip through and
+    # reach citations[-1] via Python's negative indexing downstream.
+    assert parse_citations("Nada [0].", num_citations=1) == [TextPart(text="Nada .")]
+
+
+def test_parse_citations_plain_text_is_single_textpart():
+    parts = parse_citations("Sin marcadores en absoluto.", num_citations=3)
+
+    assert parts == [TextPart(text="Sin marcadores en absoluto.")]
+
+
+def test_parse_citations_unclosed_or_nonnumeric_brackets_stay_text():
+    # "[12" never closes and "[a]" is not a marker: both remain literal text.
+    parts = parse_citations("Ver [12 y también [a].", num_citations=2)
+
+    assert all(isinstance(p, TextPart) for p in parts)
+    assert "".join(p.text for p in parts) == "Ver [12 y también [a]."
+
+
+def test_parse_citations_template_literal_is_dropped():
+    # The model sometimes echoes the prompt's "[N]" placeholder verbatim —
+    # template garbage, not prose: dropped whole, neighbours merged.
+    parts = parse_citations("Un mes [N]. Y quince días [1].", num_citations=1)
+
+    assert parts == [
+        TextPart(text="Un mes . Y quince días "),
+        CitePart(n=1),
+        TextPart(text="."),
+    ]
+
+
+def test_iter_answer_parts_template_literal_split_across_fragments():
+    # "[N]" can arrive tokenized like any marker; it must still be dropped
+    # whole, never leaking "[" or "N" into the text parts.
+    fragments = ["Un mes [", "N", "]", " y fin."]
+
+    parts = list(iter_answer_parts(fragments, num_citations=2))
+
+    assert all(isinstance(p, TextPart) for p in parts)
+    assert "".join(p.text for p in parts) == "Un mes  y fin."
+
+
+def test_iter_answer_parts_resolves_marker_split_across_fragments():
+    # The token stream splits "[2]" across three fragments — the parser must
+    # withhold the prefix and emit one whole CitePart, leaking no bracket text.
+    fragments = ["Un mes [", "2", "]", ". Fin."]
+
+    parts = list(iter_answer_parts(fragments, num_citations=2))
+
+    assert CitePart(n=2) in parts
+    text = "".join(p.text for p in parts if isinstance(p, TextPart))
+    assert text == "Un mes . Fin."
+
+
+def test_iter_answer_parts_streams_text_before_marker_completes():
+    fragments = iter(["Hola ", "mundo [", "1]"])
+
+    stream = iter_answer_parts(fragments, num_citations=1)
+
+    # Plain text flows through immediately — the parser never buffers text that
+    # provably contains no marker (streaming must not degrade to batch).
+    assert next(stream) == TextPart(text="Hola ")
+
+
+def test_generate_remaps_fragment_markers_to_citation_indexes(monkeypatch):
+    # Fragments are numbered per CHUNK (1..3) while citations dedupe by
+    # (document_id, page): [2] cites the duplicated doc-a page and [3] cites
+    # doc-b, so the CiteParts must carry the CITATION indexes (1 and 2) — the
+    # front resolves n → citations[n-1] positionally.
+    _install_chat(monkeypatch, reply="Afirmación [2]. Otra [3].")
+    generator = _make_generator()
+    context = [
+        _chunk("doc-a", 1, "primer fragmento"),
+        _chunk("doc-a", 1, "segundo fragmento"),
+        _chunk("doc-b", 2, "otra fuente"),
+    ]
+
+    answer = generator.generate(Query(text="¿?"), context=context)
+
+    assert len(answer.citations) == 2  # deduped
+    assert [(c.document_id, c.page) for c in answer.citations] == [
+        ("doc-a", 1),
+        ("doc-b", 2),
+    ]
+    cites = [p for p in answer.parts if isinstance(p, CitePart)]
+    assert [c.n for c in cites] == [1, 2]  # fragment [2]→cita 1, [3]→cita 2
+
+
+def test_generate_stream_parts_empty_context_yields_single_abstention_textpart(
+    monkeypatch,
+):
+    # Same hard guard as generate()/generate_stream(): empty context ⇒ the
+    # abstention sentence as ONE TextPart, zero CiteParts, and no LLM call.
+    def boom(url, json=None, timeout=None, stream=None):
+        raise AssertionError("LLM must not be called on empty context")
+
+    monkeypatch.setattr("requests.post", boom)
+
+    parts = list(_make_generator().generate_stream_parts(Query(text="¿?"), []))
+
+    assert parts == [TextPart(text=ABSTENTION_TEXT)]
+
+
+def test_answer_rejects_citepart_index_out_of_citations_range():
+    carried = Citation(document_id="doc", page=1)
+
+    # n beyond the citations list would render a chip resolving to nothing.
+    with pytest.raises(ValueError):
+        Answer(text="t [2]", citations=[carried], parts=[CitePart(n=2)])
+    # n=0 breaks the 1-based contract the same way.
+    with pytest.raises(ValueError):
+        Answer(text="t [0]", citations=[carried], parts=[CitePart(n=0)])
 
 
 # --- AC7: preflight failures stay distinct -----------------------------------
