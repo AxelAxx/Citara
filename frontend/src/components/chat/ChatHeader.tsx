@@ -22,15 +22,19 @@ export function ChatHeader({
   const chip =
     'inline-flex items-center rounded-sm border border-border bg-surface px-[11px] py-[6px] font-mono text-[11px] text-muted'
 
+  // .chat-header: hook for the collapse rule (index.css) — with the sidebar
+  // gone, extra padding-left clears the floating › toggle. Expanded, that
+  // toggle straddles the sidebar edge and ends 17px into this bar, so pl-8
+  // (not the symmetric px-6) keeps ~15px of air between ‹ and the chip.
   return (
     <div
-      className="flex items-center gap-4 border-b border-border px-6 py-5"
+      className="chat-header flex items-center gap-4 border-b border-border py-5 pl-8 pr-6"
       style={{
         background: 'linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%)',
       }}
     >
       {/* A display, not a button: switching domains lives in the sidebar (one
-          control); the chevron stays as a purely visual affordance. */}
+          control). */}
       <div className="flex min-w-0 items-center gap-[13px]">
         <span className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[11px] bg-accent font-mono text-[15px] font-semibold text-accent-on">
           {letter}
@@ -38,19 +42,8 @@ export function ChatHeader({
         {/* The 8px column gap is what keeps the tagline clear of the name —
             both lines sit at line-height:1 (mock tokens). */}
         <div className="flex min-w-0 flex-col items-start gap-2">
-          <span className="inline-flex items-center gap-[7px] leading-none">
-            <span className="whitespace-nowrap font-serif text-[17px] font-semibold text-text">
-              {domainName}
-            </span>
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true" className="shrink-0">
-              <path
-                d="M2.5 4.5L6 8L9.5 4.5"
-                stroke="var(--muted)"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+          <span className="whitespace-nowrap font-serif text-[17px] font-semibold leading-none text-text">
+            {domainName}
           </span>
           {/* pb-px: at line-height:1 the 11px box clips the mono descenders
               ("g") under overflow:hidden — one pixel of slack frees them. */}

@@ -57,11 +57,13 @@ export function EmptyState({ suggestions, onSelect }: EmptyStateProps) {
           Cada afirmación se ancla a su origen. Verás chips como este junto al
           texto:
         </span>
-        <span className="inline-flex shrink-0 items-center gap-2 rounded-[9px] border border-border bg-surface px-[11px] py-[7px]">
-          <sup className="inline-flex h-4 min-w-4 items-center justify-center rounded-[5px] border border-accent-line bg-accent-tint px-1 font-mono text-[10.5px] font-semibold text-accent">
+        {/* A plain span, NOT <sup>: the browser's vertical-align:super is what
+            knocked the "1" out of line with the reference text. */}
+        <span className="inline-flex shrink-0 items-center gap-[6px] rounded-[9px] border border-border bg-surface px-[11px] py-[7px]">
+          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-[5px] border border-accent-line bg-accent-tint px-1 font-mono text-[10.5px] font-semibold leading-none text-accent">
             1
-          </sup>
-          <span className="font-mono text-[11.5px] text-muted">
+          </span>
+          <span className="font-mono text-[11.5px] leading-none text-muted">
             BOE-A-2015-11430 · pág. 49
           </span>
         </span>

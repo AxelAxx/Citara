@@ -39,6 +39,19 @@ export function ChatInput({ onSubmit, disabled, placeholder }: ChatInputProps) {
           Preguntar
         </button>
       </div>
+
+      {/* Fixed UI copy (Spanish) per the mock — "esta colección" is
+          deliberately NOT the vertical's name; the design's exact text wins.
+          Colors via the CSS vars (not hex tokens) per the design hand-off. */}
+      <div className="mx-auto mt-[10px] flex max-w-[760px] items-center justify-center gap-[14px] text-[12px]">
+        <span className="text-[color:var(--muted)]">
+          Solo se usan los documentos de esta colección.
+        </span>
+        <span className="text-[color:var(--faint)] opacity-50">·</span>
+        <span className="font-mono text-[color:var(--faint)]">
+          Procesado en tu equipo · sin telemetría
+        </span>
+      </div>
     </div>
   )
 }
