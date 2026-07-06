@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from core.engine import RagEngine, StreamedAnswer
-from core.generate import ABSTENTION_TEXT, iter_answer_parts
+from core.generate import ABSTENTION_TEXT
 from core.models import (
     Answer,
     Chunk,
@@ -49,6 +49,7 @@ class _FakeGenerator:
     def __init__(self, answer: Answer, *, fragments=None, citations=None) -> None:
         self.calls: list[dict] = []
         self.stream_calls: list[dict] = []
+        self.parts_for_text_calls: list[dict] = []
         self._answer = answer
         self._fragments = list(fragments) if fragments is not None else []
         self._citations = list(citations) if citations is not None else []
@@ -68,13 +69,17 @@ class _FakeGenerator:
         yield from self._fragments
 
     def generate_stream_parts(self, query, context):
-        # Delegate through the REAL incremental parser so engine tests exercise
-        # the same fragments→parts contract production uses; laziness is
-        # preserved because both wrapped functions are generators.
-        return iter_answer_parts(
-            self.generate_stream(query, context),
-            len(self._citations) if context else 0,
-        )
+        # Mirror the real contract (clean prose): TextParts as fragments
+        # arrive; anchored CiteParts exist only in the final resolution
+        # (parts_for_text), never in the live stream.
+        for fragment in self.generate_stream(query, context):
+            yield TextPart(text=fragment)
+
+    def parts_for_text(self, text, context):
+        # Records the close-time resolution the engine's resolve_parts seam
+        # delegates to; echoes a trivial single-TextPart view.
+        self.parts_for_text_calls.append({"text": text, "context": context})
+        return text, [TextPart(text=text)]
 
     def citations_for_context(self, context):
         # Citations derive from context: none when there is nothing to ground on.
@@ -305,15 +310,15 @@ def test_answer_stream_empty_context_abstains_with_no_citations():
     assert streamed.citations == []
 
 
-def test_answer_stream_part_stream_emits_citepart_when_marker_closes():
+def test_answer_stream_part_stream_is_plain_textparts():
+    # Clean-prose contract: the LIVE stream is fragments as TextParts verbatim
+    # — nothing is parsed or withheld. Anchored CiteParts arrive only through
+    # the resolve_parts seam at close (tested below).
     context = [Chunk(text="t", metadata=ChunkMetadata(document_id="doc", page=1))]
-    citation = Citation(document_id="doc", page=1)
     generator = _FakeGenerator(
         _answer_with_citation(),
-        # The "[1]" arrives split across three fragments — the streaming parser
-        # must hold it back and resolve it whole, never leak "[" as text.
-        fragments=["Un mes [", "1", "]", " y nada más."],
-        citations=[citation],
+        fragments=["Un mes ", "y nada más."],
+        citations=[Citation(document_id="doc", page=1)],
     )
     engine = RagEngine(
         retriever=_FakeRetriever(context),
@@ -324,9 +329,30 @@ def test_answer_stream_part_stream_emits_citepart_when_marker_closes():
 
     parts = list(engine.answer_stream("¿plazo?").part_stream)
 
-    assert CitePart(n=1) in parts
-    text = "".join(p.text for p in parts if isinstance(p, TextPart))
-    assert text == "Un mes  y nada más."  # marker text never leaks into TextParts
+    assert parts == [TextPart(text="Un mes "), TextPart(text="y nada más.")]
+
+
+def test_answer_stream_resolve_parts_delegates_to_generator_with_context():
+    context = [Chunk(text="t", metadata=ChunkMetadata(document_id="doc", page=1))]
+    generator = _FakeGenerator(
+        _answer_with_citation(),
+        fragments=["Un mes."],
+        citations=[Citation(document_id="doc", page=1)],
+    )
+    engine = RagEngine(
+        retriever=_FakeRetriever(context),
+        generator=generator,
+        top_k=5,
+        relevance_threshold=1.0,
+    )
+
+    streamed = engine.answer_stream("¿plazo?")
+    text, parts = streamed.resolve_parts("Un mes.")
+
+    # The seam is bound to THIS retrieval's context: the caller (the API's
+    # done event) never handles a RetrievedContext itself.
+    assert generator.parts_for_text_calls == [{"text": "Un mes.", "context": context}]
+    assert (text, parts) == ("Un mes.", [TextPart(text="Un mes.")])
 
 
 # --- corpus_stats façade (FR-#06): delegates, never counts ---------------------

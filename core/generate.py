@@ -34,8 +34,7 @@ Zero vertical logic here: every legal/health difference lives in the
 from __future__ import annotations
 
 import json
-import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 
 from core.embed import _model_is_available  # shared model-match rule; keep one source
 from core.models import (
@@ -69,29 +68,10 @@ _DEFAULT_TEMPERATURE = 0.1
 # so the deterministic guard and any future LLM-side abstention read identically.
 ABSTENTION_TEXT = "No encuentro esto en los documentos proporcionados."
 
-# Inline citation markers exactly as the SystemPrompt instructs the model to
-# emit them: "[N]", N being the 1-based fragment number _format_block puts in
-# front of every context block. The YAML prompt and this regex MUST stay in
-# sync — both live on the "[N]" notation.
-_MARKER_RE = re.compile(r"\[(\d+)\]")
-
-# The exact "[N]" placeholder from the SystemPrompt instructions. The 7B model
-# sometimes echoes it verbatim instead of substituting a real number — that is
-# template garbage, not prose the user should read, so it is DROPPED whole
-# (the same fate as an out-of-range marker) instead of being left inline.
-_TEMPLATE_LITERAL = "[N]"
-
-# A "[" followed by up to this many digits — or the "N" of the echoed template
-# — could still close into something we must resolve, and is worth withholding
-# while streaming. Real fragment numbers are top_k-sized (single digits), so
-# anything longer stops being buffered and flushes as plain text — the cap
-# exists so a pathological digit run can't buffer unboundedly.
-_MARKER_PREFIX_RE = re.compile(r"\[(?:\d{0,6}|N)")
-
 
 # --- structured citation anchoring (inline_citation_mode="structured") --------
-# The [N]-marker mechanism below proved intermittent on the 7B (markers appear
-# or vanish per run/phrasing). This section replaces it in two deterministic
+# The [N]-marker mechanism this replaced proved intermittent on the 7B (markers
+# appeared or vanished per run/phrasing). This section works in two deterministic
 # steps: (1) the Generator writes CLEAN prose (no markers), (2) a second LLM
 # call with format:"json" anchors each sentence to its supporting fragment,
 # validated fail-safe. CiteParts are born from validated anchors, not from the
@@ -259,11 +239,7 @@ def _parts_from_anchors(
     return _merge_adjacent_text(parts)
 
 
-# --- inline citation markers → AnswerParts (FR9 / 3b) --------------------------
-# RETAINED for the API's done event, which still resolves parts marker-wise
-# (parse_citations) until the API step of the structured-citation redesign
-# lands. The structured mode above does NOT use this path; once the API and
-# front consume parts_for_text, this section can be removed.
+# --- shared text helpers -------------------------------------------------------
 
 
 def strip_trailing_abstention(text: str) -> str:
@@ -271,18 +247,18 @@ def strip_trailing_abstention(text: str) -> str:
     whitespace/newlines immediately around it — or return ``text`` untouched.
 
     Why this exists: the 7B intermittently appends the abstention sentence
-    after a fully cited answer, and the prompt cannot suppress it — 10 wording
-    variants were tested and every one that killed the trailing phrase also
-    broke the [N] markers on other queries. A cited answer that ends in "I
-    can't find this" contradicts itself (golden rule 3: grounded+cited OR
-    abstention, never both), so the contradiction is removed deterministically
-    here instead of hoped away in the prompt.
+    after a real answer, and the prompt cannot suppress it (10 wording
+    variants were tested; every one traded the trailing phrase for other
+    regressions). An answer that ends in "I can't find this" contradicts
+    itself (golden rule 3: grounded+cited OR abstention, never both), so the
+    contradiction is removed deterministically here instead of hoped away in
+    the prompt.
 
     Deliberately narrow: only a TRAILING, byte-exact occurrence of the literal
     is removed — never a mid-text occurrence, never a paraphrase. Callers must
-    apply it only to answers that actually cite (see ``_resolve_final_text``),
-    so a pure abstention — where the phrase IS the whole answer — is never
-    emptied.
+    guard the pure-abstention case (see ``Generator._resolve_parts``): when
+    the phrase IS the whole answer this returns "", and the caller keeps the
+    original instead.
     """
     trimmed = text.rstrip()
     if not trimmed.endswith(ABSTENTION_TEXT):
@@ -290,133 +266,8 @@ def strip_trailing_abstention(text: str) -> str:
     return trimmed[: -len(ABSTENTION_TEXT)].rstrip()
 
 
-def parse_citations(text: str, num_citations: int) -> list[AnswerPart]:
-    """Split LLM text with inline ``[N]`` markers into typed AnswerParts.
-
-    ``num_citations`` is the count marker numbers are validated against —
-    whatever indexing the caller's text uses. The Generator parses with the
-    *fragment* count (the prompt numbers fragments 1..len(context)) and then
-    remaps every n to its 1-based position in the deduped ``Answer.citations``
-    (see ``_fragment_index_to_citation_index``), because a CitePart's ``n``
-    must resolve positionally against the citations list the renderer holds.
-
-    Validation is fail-fast by dropping: the 7B model echoes the context's
-    [N]-numbered blocks and may emit malformed or out-of-range markers ([7]
-    with 5 fragments, [0], "[12" never closed) — and sometimes the "[N]"
-    template placeholder itself, verbatim. A marker with no real fragment
-    behind it is an LLM error, not a citation — rendering it would show a chip
-    that opens nothing — so we validate every N against the real citation
-    count and drop invalid markers (and the echoed placeholder) cleanly rather
-    than propagate broken cites. Anything else in brackets ("[a]", an unclosed
-    "[12") is NOT marker-shaped and stays as literal text.
-
-    One algorithm with the streaming path: this is :func:`iter_answer_parts`
-    over a single fragment, plus merging of adjacent TextParts (a dropped
-    marker leaves its two text neighbours split in the incremental view).
-
-    Also the entry point for the trailing-abstention strip: cited answers
-    (>= 1 CitePart) lose a trailing ``ABSTENTION_TEXT`` here, via
-    ``_resolve_final_text`` — see :func:`strip_trailing_abstention` for why.
-    """
-    _, parts = _resolve_final_text(text, num_citations)
-    return parts
-
-
-def _resolve_final_text(text: str, num_citations: int) -> tuple[str, list[AnswerPart]]:
-    """THE single final-text resolution site (DRY): parse markers into parts
-    and, iff the answer actually cites, drop a trailing abstention sentence.
-
-    Both authoritative consumers flow through here — ``Generator.generate``
-    directly (so ``Answer.text`` and ``Answer.parts`` stay one coherent view)
-    and the API's SSE ``done`` event via :func:`parse_citations`. Cited-ness is
-    decided on the PARSED parts, not on a raw regex: dropped/out-of-range
-    markers don't count as citing, so a pure abstention (0 CiteParts — the
-    phrase IS the answer) is returned untouched, never emptied.
-    """
-    parts = _merge_adjacent_text(list(iter_answer_parts([text], num_citations)))
-    if not any(isinstance(part, CitePart) for part in parts):
-        return text, parts
-
-    stripped = strip_trailing_abstention(text)
-    if stripped == text:
-        return text, parts
-    # Re-parse the stripped text so the removed sentence can't leave a spurious
-    # trailing TextPart behind. The stripped suffix is the bare literal (no
-    # markers), so every CitePart survives the second pass identically.
-    return stripped, _merge_adjacent_text(
-        list(iter_answer_parts([stripped], num_citations))
-    )
-
-
-def iter_answer_parts(
-    fragments: Iterable[str], num_citations: int
-) -> Iterator[AnswerPart]:
-    """Streaming marker parser: text fragments in, AnswerParts out.
-
-    A ``[N]`` can arrive split across LLM tokens ("[", "2", "]"), so plain text
-    is emitted as soon as it provably contains no marker, while a trailing
-    prefix that could still become one ("[", "[12") is withheld until it either
-    closes (→ CitePart), proves to be plain text, or the stream ends — an
-    unclosed "[12" at end of stream flushes as text, exactly what the
-    non-streaming regex would have left alone.
-    """
-    pending = ""
-    for fragment in fragments:
-        pending += fragment
-        emitted, pending = _drain_pending(pending, num_citations, stream_open=True)
-        yield from emitted
-    emitted, _ = _drain_pending(pending, num_citations, stream_open=False)
-    yield from emitted
-
-
-def _drain_pending(
-    pending: str, num_citations: int, *, stream_open: bool
-) -> tuple[list[AnswerPart], str]:
-    """Consume ``pending`` into parts; return what must stay buffered.
-
-    Only a suffix that could still become a marker survives in the buffer, and
-    only while the stream is open — everything else is resolved now.
-    """
-    parts: list[AnswerPart] = []
-    while pending:
-        bracket = pending.find("[")
-        if bracket == -1:
-            parts.append(TextPart(text=pending))
-            pending = ""
-            break
-        if bracket > 0:
-            parts.append(TextPart(text=pending[:bracket]))
-            pending = pending[bracket:]
-
-        match = _MARKER_RE.match(pending)
-        if match:
-            n = int(match.group(1))
-            # Out-of-range N = LLM error, not a citation (see parse_citations):
-            # the marker is dropped whole. In range, it resolves 1-based.
-            if 1 <= n <= num_citations:
-                parts.append(CitePart(n=n))
-            pending = pending[match.end() :]
-            continue
-
-        if pending.startswith(_TEMPLATE_LITERAL):
-            # Echoed prompt placeholder, dropped whole (see _TEMPLATE_LITERAL).
-            pending = pending[len(_TEMPLATE_LITERAL) :]
-            continue
-
-        if stream_open and _MARKER_PREFIX_RE.fullmatch(pending):
-            # Could still close into a marker (or the "[N]" template) — hold it
-            # back for the next fragment.
-            break
-
-        # Provably not a marker (or the stream is over): the "[" was plain
-        # text. Emit it and keep scanning what follows for later markers.
-        parts.append(TextPart(text="["))
-        pending = pending[1:]
-    return parts, pending
-
-
 def _merge_adjacent_text(parts: list[AnswerPart]) -> list[AnswerPart]:
-    """Collapse consecutive TextParts (dropped markers leave split neighbours)."""
+    """Collapse consecutive TextParts (unanchored sentences leave neighbours)."""
     merged: list[AnswerPart] = []
     for part in parts:
         if merged and isinstance(part, TextPart) and isinstance(merged[-1], TextPart):
@@ -424,23 +275,6 @@ def _merge_adjacent_text(parts: list[AnswerPart]) -> list[AnswerPart]:
         else:
             merged.append(part)
     return merged
-
-
-def _remap_cite_indexes(
-    parts: Iterable[AnswerPart], fragment_to_citation: list[int]
-) -> Iterator[AnswerPart]:
-    """Rewrite each CitePart's fragment number as its citation-list index.
-
-    ``fragment_to_citation[i]`` is the 1-based citations index for fragment
-    ``i+1`` (see ``Generator._fragment_index_to_citation_index``). The parser
-    already guaranteed 1 <= n <= len(fragment_to_citation), so the lookup can't
-    miss. Lazy on purpose: streaming callers remap part-by-part as they emit.
-    """
-    for part in parts:
-        if isinstance(part, CitePart):
-            yield CitePart(n=fragment_to_citation[part.n - 1])
-        else:
-            yield part
 
 
 class Generator:

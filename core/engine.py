@@ -19,7 +19,7 @@ presentation.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from core.embed import OllamaEmbedder
@@ -45,23 +45,32 @@ class StreamedAnswer:
     """The streaming counterpart of an :class:`Answer`: content arrives
     incrementally, Citations are known up front.
 
-    ``part_stream`` is the primary stream (3b): TextParts as the LLM emits text,
-    plus a CitePart the instant a complete inline ``[N]`` marker closes.
-    ``citations`` are derived from the retrieved context the moment retrieval
-    returns — they do not change token-by-token — so the SourcesPanel renders
-    from the same provenance the non-streaming :meth:`RagEngine.answer` carries.
+    ``part_stream`` is the LIVE view: TextParts as the LLM emits clean prose
+    (no inline markers — the citation redesign anchors citations after the
+    fact). ``citations`` are derived from the retrieved context the moment
+    retrieval returns — they do not change token-by-token — so the
+    SourcesPanel renders from the same provenance the non-streaming
+    :meth:`RagEngine.answer` carries.
 
-    ``text_stream`` remains for plain-text consumers as a DERIVED view (see the
-    property below), so nothing that renders raw text had to change.
+    ``resolve_parts`` is the CLOSE seam: call it once with the accumulated
+    full text and it returns the (final text, anchored parts) the Generator's
+    ``parts_for_text`` produces — already bound to THIS answer's retrieved
+    context, so the caller (the API's done event) never handles a
+    RetrievedContext. In "structured" mode this is where the anchor pass runs
+    (second LLM call — the latency between the last token and the parts).
 
-    Trade-off, stated loudly: both attributes wrap the SAME single-use LLM
-    stream. Consume exactly ONE of them, exactly once — handing out two live
-    iterators would require either a second LLM call or buffering the whole
-    reply, both worse than this rule.
+    ``text_stream`` remains for plain-text consumers as a DERIVED view (see
+    the property below), so nothing that renders raw text had to change.
+
+    Trade-off, stated loudly: part_stream/text_stream wrap the SAME single-use
+    LLM stream. Consume exactly ONE of them, exactly once — handing out two
+    live iterators would require either a second LLM call or buffering the
+    whole reply, both worse than this rule.
     """
 
     part_stream: Iterator[AnswerPart]
     citations: list[Citation]
+    resolve_parts: Callable[[str], tuple[str, list[AnswerPart]]]
 
     @property
     def text_stream(self) -> Iterator[str]:
@@ -226,7 +235,16 @@ class RagEngine:
         # Citations are fixed the instant retrieval returns; only content streams.
         part_stream = self._generator.generate_stream_parts(query, context)
         citations = self._generator.citations_for_context(context)
-        return StreamedAnswer(part_stream=part_stream, citations=citations)
+        return StreamedAnswer(
+            part_stream=part_stream,
+            citations=citations,
+            # Bound to THIS retrieval's context so the streaming consumer can
+            # resolve the final anchored parts at close without ever holding a
+            # RetrievedContext itself (Presentation stays decoupled).
+            resolve_parts=lambda full_text: self._generator.parts_for_text(
+                full_text, context
+            ),
+        )
 
     def warm_up(self) -> None:
         """Preload the LLM into VRAM before the first Query (latency optimization).

@@ -104,10 +104,10 @@ retrieval returns) and streams text after — so the SSE event order mirrors tha
    - `is_abstention` here reflects ONLY the hard path (`citations == []`). It is an early
      hint, NOT the final decision — the authoritative resolution arrives in `done` (soft
      abstention is only detectable after the full text is known).
-2. `event: token` — repeated, one per text fragment from `text_stream`. UNCHANGED by the
-   inline-citation feature: plain text for the typewriter effect. The text may carry raw
-   `[N]` markers (already validated + remapped by core); the client does NOT parse or
-   paint them — chips wait for `done`.
+2. `event: token` — repeated, one per text fragment from `text_stream`. Plain CLEAN prose
+   for the typewriter effect: the model no longer emits `[N]` markers (citation redesign —
+   citations are anchored after the fact, not written inline). The client renders tokens
+   verbatim; chips wait for `done`.
    ```
    event: token
    data: {"text": "Según"}
@@ -116,22 +116,29 @@ retrieval returns) and streams text after — so the SSE event order mirrors tha
    ```
    event: done
    data: {"is_abstention": false, "suppress_citations": false, "parts": [
-     {"kind": "text", "text": "Según el artículo 38 del Estatuto "},
-     {"kind": "cite", "n": 1},
-     {"kind": "text", "text": ", el periodo será..."}
+     {"kind": "text", "text": "Según el artículo 38 del Estatuto, el periodo será de treinta días naturales."},
+     {"kind": "cite", "n": 1}
    ]}
    ```
-   - `parts` (NEW) is the parsed view of the streamed text: `TextPart` runs interleaved
-     with `CitePart{n}` markers, produced by `core.generate.parse_citations`. `n` is the
-     **1-based index into the `citations` event's list** (core already remapped fragment
-     numbers through the dedup) — the client resolves `n → citations[n-1]` positionally
-     and NEVER parses `[N]` markers itself (that shortcut lived in the front temporarily;
-     the contract now provides the parsed view).
+   - `parts` come from the **structured anchoring pass** (`Generator.parts_for_text`, via
+     the `StreamedAnswer.resolve_parts` seam) — NOT from parsing markers: core segments
+     the clean text into sentences and a second constrained-JSON LLM call anchors each
+     supported sentence to its fragment, validated deterministically. `n` is the **1-based
+     index into the `citations` event's list** (core already remapped fragment numbers
+     through the dedup) — the client resolves `n → citations[n-1]` positionally and never
+     parses anything itself.
+   - **`inline_citation_mode`** (per-vertical config, `structured | off`) governs what
+     `parts` contain. `structured`: TextParts interleaved with anchored CiteParts; the
+     anchor pass runs at close over the full text, so `done` arrives a few seconds AFTER
+     the last `token` (the user is already reading the complete answer — accepted
+     trade-off). `off`: a single `TextPart`, no chips, no second LLM call, `done` is
+     immediate. The api never decides the mode; core does.
    - Client flow (enfoque B): render `token` text incrementally while streaming; on `done`,
      replace the raw text with the render of `parts` (CiteChips in place).
    - On abstention, `parts` is a single `TextPart` with the abstention text and NO
-     `CitePart`s — consistent with `suppress_citations` (a cite chip under a suppressed
-     sources panel would point at nothing renderable).
+     `CitePart`s — never an empty list — consistent with `suppress_citations` (a cite chip
+     under a suppressed sources panel would point at nothing renderable). The anchor pass
+     is skipped entirely on abstention.
    The server accumulates the full text during the stream and resolves abstention at close
    with the SAME criterion the Streamlit `layout` used
    (`not citations or full_text.strip().startswith(ABSTENTION_TEXT)`). The client renders

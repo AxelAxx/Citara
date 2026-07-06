@@ -246,15 +246,27 @@ class Answer(BaseModel):
                 raise ValueError(
                     "Answer.parts contains a CitePart whose n does not index "
                     "Answer.citations (1-based). Build parts through "
-                    "core.generate (parse_citations + the Generator's fragment "
-                    "remap) from the same citation list the Answer carries."
+                    "core.generate (the structured anchor pass + the "
+                    "Generator's fragment remap) from the same citation list "
+                    "the Answer carries."
                 )
         return self
 
     @classmethod
     def abstention(cls, text: str) -> Answer:
-        """Factory for the Abstention case: no citations, explicitly flagged."""
-        return cls(text=text, citations=[], is_abstention=True)
+        """Factory for the Abstention case: no citations, explicitly flagged.
+
+        ``parts`` is the single TextPart, never empty: the contract renders
+        answers FROM parts, so an abstention with ``parts=[]`` would be an
+        Answer a parts-consumer displays as nothing. One TextPart, zero
+        CiteParts — exactly the abstention shape the API contract documents.
+        """
+        return cls(
+            text=text,
+            citations=[],
+            is_abstention=True,
+            parts=[TextPart(text=text)],
+        )
 
 
 class CorpusStats(BaseModel):

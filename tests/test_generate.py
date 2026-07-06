@@ -17,8 +17,6 @@ from core.generate import (
     ABSTENTION_TEXT,
     Generator,
     _parse_anchor_json,
-    iter_answer_parts,
-    parse_citations,
     split_into_sentences,
     strip_trailing_abstention,
 )
@@ -176,6 +174,9 @@ def test_empty_context_abstains_without_calling_llm(monkeypatch):
     assert answer.is_abstention is True
     assert answer.citations == []
     assert answer.text == ABSTENTION_TEXT
+    # Never parts=[]: the contract renders FROM parts, so an abstention must
+    # carry its single TextPart (and zero CiteParts) to be displayable.
+    assert answer.parts == [TextPart(text=ABSTENTION_TEXT)]
 
 
 # --- FR7: grounded prompt carries formatted citable blocks -------------------
@@ -346,130 +347,34 @@ def test_generate_raises_on_missing_message_content(monkeypatch):
         _make_generator().generate(Query(text="x"), context=[_chunk("doc", 1)])
 
 
-# --- FR9 / 3b: inline [N] markers → AnswerParts --------------------------------
-
-
-def test_parse_citations_valid_markers_build_parts():
-    parts = parse_citations("Un mes [1]. Quince días [2].", num_citations=2)
-
-    assert parts == [
-        TextPart(text="Un mes "),
-        CitePart(n=1),
-        TextPart(text=". Quince días "),
-        CitePart(n=2),
-        TextPart(text="."),
-    ]
-
-
-def test_parse_citations_out_of_range_marker_is_dropped():
-    # [7] has no fragment behind it — an LLM error, not a citation. It is
-    # scrubbed whole and its text neighbours merge back together.
-    parts = parse_citations("Cierto [1]. Inventado [7]. Fin.", num_citations=1)
-
-    assert parts == [
-        TextPart(text="Cierto "),
-        CitePart(n=1),
-        TextPart(text=". Inventado . Fin."),
-    ]
-    # [0] is equally out of range (1-based): it must never slip through and
-    # reach citations[-1] via Python's negative indexing downstream.
-    assert parse_citations("Nada [0].", num_citations=1) == [TextPart(text="Nada .")]
-
-
-def test_parse_citations_plain_text_is_single_textpart():
-    parts = parse_citations("Sin marcadores en absoluto.", num_citations=3)
-
-    assert parts == [TextPart(text="Sin marcadores en absoluto.")]
-
-
-def test_parse_citations_unclosed_or_nonnumeric_brackets_stay_text():
-    # "[12" never closes and "[a]" is not a marker: both remain literal text.
-    parts = parse_citations("Ver [12 y también [a].", num_citations=2)
-
-    assert all(isinstance(p, TextPart) for p in parts)
-    assert "".join(p.text for p in parts) == "Ver [12 y también [a]."
-
-
-def test_parse_citations_template_literal_is_dropped():
-    # The model sometimes echoes the prompt's "[N]" placeholder verbatim —
-    # template garbage, not prose: dropped whole, neighbours merged.
-    parts = parse_citations("Un mes [N]. Y quince días [1].", num_citations=1)
-
-    assert parts == [
-        TextPart(text="Un mes . Y quince días "),
-        CitePart(n=1),
-        TextPart(text="."),
-    ]
-
-
-# --- trailing-abstention strip (golden rule 3: cited OR abstention, never both) ---
+# --- trailing-abstention strip (golden rule 3: answered OR abstention, never both) ---
 
 
 def test_strip_trailing_abstention_removes_exact_suffix_and_surrounding_whitespace():
-    text = f"El plazo es de un mes [1].\n\n  {ABSTENTION_TEXT}  \n"
+    text = f"El plazo es de un mes.\n\n  {ABSTENTION_TEXT}  \n"
 
-    assert strip_trailing_abstention(text) == "El plazo es de un mes [1]."
+    assert strip_trailing_abstention(text) == "El plazo es de un mes."
 
 
 def test_strip_trailing_abstention_returns_text_without_suffix_untouched():
-    text = "El plazo es de un mes [1]."
+    text = "El plazo es de un mes."
 
     assert strip_trailing_abstention(text) == text
 
 
-def test_cited_text_with_trailing_abstention_loses_it_in_parts():
-    # The 7B's mixed failure mode: a correct cited answer + the abstention
-    # sentence appended. The parts view must not carry the spurious TextPart.
-    text = f"El plazo es de un mes [1].\n\n{ABSTENTION_TEXT}"
-
-    parts = parse_citations(text, num_citations=2)
-
-    assert parts == [
-        TextPart(text="El plazo es de un mes "),
-        CitePart(n=1),
-        TextPart(text="."),
-    ]
-
-
-def test_pure_abstention_is_never_stripped():
-    # 0 CiteParts ⇒ the phrase IS the answer (e.g. the empty-context guard):
-    # stripping here would return an empty Answer — the critical non-case.
-    parts = parse_citations(ABSTENTION_TEXT, num_citations=0)
-
-    assert parts == [TextPart(text=ABSTENTION_TEXT)]
-
-
-def test_cited_text_without_trailing_abstention_is_untouched():
-    parts = parse_citations("El plazo es de un mes [1].", num_citations=1)
-
-    assert parts == [
-        TextPart(text="El plazo es de un mes "),
-        CitePart(n=1),
-        TextPart(text="."),
-    ]
-
-
-def test_mid_text_abstention_is_not_stripped():
+def test_strip_trailing_abstention_ignores_mid_text_occurrence():
     # Only a TRAILING occurrence goes; the phrase inside the prose stays.
-    text = f"{ABSTENTION_TEXT} Sin embargo, el artículo 5 dice otra cosa [1]."
+    text = f"{ABSTENTION_TEXT} Sin embargo, el artículo 5 dice otra cosa."
 
-    parts = parse_citations(text, num_citations=1)
-
-    assert parts == [
-        TextPart(text=f"{ABSTENTION_TEXT} Sin embargo, el artículo 5 dice otra cosa "),
-        CitePart(n=1),
-        TextPart(text="."),
-    ]
+    assert strip_trailing_abstention(text) == text
 
 
-def test_paraphrased_trailing_abstention_is_not_stripped():
+def test_strip_trailing_abstention_ignores_paraphrase():
     # Byte-exactness: only the literal is removed, never a lookalike — a
     # paraphrase is LLM prose, and guessing at it would censor real text.
-    text = "El plazo es de un mes [1]. No encuentro esto en los documentos."
+    text = "El plazo es de un mes. No encuentro esto en los documentos."
 
-    parts = parse_citations(text, num_citations=1)
-
-    assert parts[-1] == TextPart(text=". No encuentro esto en los documentos.")
+    assert strip_trailing_abstention(text) == text
 
 
 def test_generate_strips_trailing_abstention_from_text_and_parts(monkeypatch):
@@ -485,39 +390,6 @@ def test_generate_strips_trailing_abstention_from_text_and_parts(monkeypatch):
 
     assert answer.text == "El plazo es de un mes."
     assert answer.parts == [TextPart(text="El plazo es de un mes.")]
-
-
-def test_iter_answer_parts_template_literal_split_across_fragments():
-    # "[N]" can arrive tokenized like any marker; it must still be dropped
-    # whole, never leaking "[" or "N" into the text parts.
-    fragments = ["Un mes [", "N", "]", " y fin."]
-
-    parts = list(iter_answer_parts(fragments, num_citations=2))
-
-    assert all(isinstance(p, TextPart) for p in parts)
-    assert "".join(p.text for p in parts) == "Un mes  y fin."
-
-
-def test_iter_answer_parts_resolves_marker_split_across_fragments():
-    # The token stream splits "[2]" across three fragments — the parser must
-    # withhold the prefix and emit one whole CitePart, leaking no bracket text.
-    fragments = ["Un mes [", "2", "]", ". Fin."]
-
-    parts = list(iter_answer_parts(fragments, num_citations=2))
-
-    assert CitePart(n=2) in parts
-    text = "".join(p.text for p in parts if isinstance(p, TextPart))
-    assert text == "Un mes . Fin."
-
-
-def test_iter_answer_parts_streams_text_before_marker_completes():
-    fragments = iter(["Hola ", "mundo [", "1]"])
-
-    stream = iter_answer_parts(fragments, num_citations=1)
-
-    # Plain text flows through immediately — the parser never buffers text that
-    # provably contains no marker (streaming must not degrade to batch).
-    assert next(stream) == TextPart(text="Hola ")
 
 
 # --- structured citation mode: segmentation, anchoring, assembly --------------
