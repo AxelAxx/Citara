@@ -2,8 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { Health } from '../../api/client'
 import { ChatHeader } from '../../components/chat/ChatHeader'
 import { ChatInput } from '../../components/chat/ChatInput'
+import { CorpusDrawer } from '../../components/chat/CorpusDrawer'
+import { QuitDialog } from '../../components/QuitDialog'
+import { quitApp } from '../../lib/quit'
 import { EmptyState } from '../../components/chat/EmptyState'
 import { Message } from '../../components/chat/Message'
+import { SidebarToggle } from '../../components/chat/SidebarToggle'
 import { Sidebar } from '../../components/Sidebar/Sidebar'
 import { useChat } from '../../hooks/useChat'
 import type { VerticalCorpus } from '../../hooks/useVerticals'
@@ -53,6 +57,12 @@ export function Chat({ verticalId, verticals, health }: ChatProps) {
   const [activeConversationId, setActiveConversationId] = useState<
     string | null
   >(null)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [corpusOpen, setCorpusOpen] = useState(false)
+  const [quitDialogOpen, setQuitDialogOpen] = useState(false)
+  // True once the browser refused window.close() — renders the farewell
+  // notice, the only thing left to say in a tab we cannot close ourselves.
+  const [quitBlocked, setQuitBlocked] = useState(false)
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
   const selected = verticals.find((v) => v.view.id === activeId) ?? null
@@ -80,8 +90,36 @@ export function Chat({ verticalId, verticals, health }: ChatProps) {
     setActiveConversationId(conversation.id)
   }
 
+  const confirmQuit = async () => {
+    setQuitDialogOpen(false)
+    // 'blocked' = the browser kept the tab open (only script-opened windows
+    // may close themselves) — all we can do is say goodbye.
+    if ((await quitApp()) === 'blocked') setQuitBlocked(true)
+  }
+
   return (
-    <div className="flex h-screen overflow-hidden bg-bg">
+    <div
+      className={`relative flex h-screen overflow-hidden bg-bg ${
+        sidebarCollapsed ? 'side-collapsed' : ''
+      }`}
+    >
+      {/* Straddles the sidebar's right edge while open; parks floating at the
+          window's top-left once the sidebar is gone. Its `left` transitions in
+          step with the sidebar width (same .24s, index.css). top 27px + half
+          the 28px button = 41px, the header's vertical center (py-5 20px +
+          half the 42px domain chip) — the ‹ sits on the chip's midline. The
+          -14px in the calc is likewise half the button, centered on the edge. */}
+      <div
+        className={`absolute top-[27px] z-20 transition-[left] duration-[240ms] ease-[ease] ${
+          sidebarCollapsed ? 'left-5' : 'left-[calc(var(--sidebar-w)-14px)]'
+        }`}
+      >
+        <SidebarToggle
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed((prev) => !prev)}
+        />
+      </div>
+
       <Sidebar
         verticals={verticals}
         selectedId={activeId}
@@ -91,6 +129,8 @@ export function Chat({ verticalId, verticals, health }: ChatProps) {
         activeConversationId={activeConversation?.id ?? null}
         onSelectConversation={setActiveConversationId}
         onNewConversation={startConversation}
+        onManageCorpus={() => setCorpusOpen(true)}
+        onQuit={() => setQuitDialogOpen(true)}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
@@ -134,6 +174,36 @@ export function Chat({ verticalId, verticals, health }: ChatProps) {
           }
         />
       </main>
+
+      {/* Data comes from the /corpus already loaded for this vertical (via
+          VerticalCorpus.documentIds) — opening the drawer never refetches. */}
+      {selected && (
+        <CorpusDrawer
+          open={corpusOpen}
+          onClose={() => setCorpusOpen(false)}
+          verticalId={selected.view.id}
+          domainName={selected.view.domain_name}
+          documentCount={selected.documentCount}
+          chunkCount={selected.chunkCount}
+          documents={selected.documentIds}
+        />
+      )}
+
+      <QuitDialog
+        open={quitDialogOpen}
+        onCancel={() => setQuitDialogOpen(false)}
+        onConfirm={confirmQuit}
+      />
+
+      {/* Farewell for the browser-blocked quit path: quitApp() already tried
+          window.close(); the tab is now the user's to close. */}
+      {quitBlocked && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[var(--bg)]">
+          <p className="px-6 text-center font-serif text-[19px] text-[color:var(--text)]">
+            Puedes cerrar esta ventana. Hasta pronto.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

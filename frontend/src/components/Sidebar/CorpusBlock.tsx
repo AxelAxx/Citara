@@ -3,11 +3,15 @@ export interface CorpusBlockProps {
   ready: boolean
   documentCount: number
   chunkCount: number
+  /** Opens the CorpusDrawer — state lives in Chat.tsx, not here. */
+  onManage: () => void
 }
 
 // Spanish typographic thousands: "3 407" with a non-breaking space, so the
 // mono stat line never wraps mid-number.
-function formatThousands(n: number): string {
+// Exported: the CorpusDrawer renders the same stat line and must format
+// identically.
+export function formatThousands(n: number): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
 }
 
@@ -15,6 +19,7 @@ export function CorpusBlock({
   ready,
   documentCount,
   chunkCount,
+  onManage,
 }: CorpusBlockProps) {
   return (
     <div>
@@ -38,6 +43,13 @@ export function CorpusBlock({
           {formatThousands(documentCount)} docs ·{' '}
           {formatThousands(chunkCount)} fragmentos
         </div>
+        <button
+          type="button"
+          onClick={onManage}
+          className="mt-[10px] w-full rounded-[7px] border border-border bg-transparent px-2 py-[6px] font-mono text-[11px] text-muted transition-colors hover:border-accent-line hover:text-accent"
+        >
+          Gestionar corpus
+        </button>
       </div>
     </div>
   )

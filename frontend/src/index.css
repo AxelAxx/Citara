@@ -26,10 +26,61 @@
   --warn: #e6a95c;
   --warn-tint: rgba(230, 169, 92, 0.13);
   --warn-line: rgba(230, 169, 92, 0.38);
+  /* Quit/destructive action (QuitButton, QuitDialog). Outside the accent
+     quartet on purpose: danger never swaps per vertical. */
+  --danger: #e5484d;
+  --danger-tint: rgba(229, 72, 77, 0.1);
+  --danger-line: rgba(229, 72, 77, 0.35);
   --accent: #7c9cff;
   --accent-on: #0c0d10;
   --accent-tint: rgba(124, 156, 255, 0.13);
   --accent-line: rgba(124, 156, 255, 0.36);
+  --sidebar-w: 296px;
+}
+
+/* Sidebar collapse — .side-collapsed is applied from React state on the chat
+   layout root (Chat.tsx), never toggled imperatively. visibility drops the
+   hidden sidebar from the tab order; its interpolation rules mean it only
+   flips at the end of the close animation (and instantly on reopen).
+   Two-class specificity beats the Tailwind utilities — no !important. */
+.chat-sidebar {
+  transition:
+    width 0.24s ease,
+    padding 0.24s ease,
+    visibility 0.24s;
+}
+.side-collapsed .chat-sidebar {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/* With the sidebar collapsed the › toggle floats over the main column
+   (left 20px + 34px wide = ends at 54px), so the header needs extra
+   padding-left for the domain chip to clear it. Same .24s as the collapse
+   so the chip slides in step with the button. */
+.chat-header {
+  transition: padding-left 0.24s ease;
+}
+.side-collapsed .chat-header {
+  padding-left: 64px;
+}
+
+/* Corpus drawer entry (mock's translateX slide). Only the way IN animates:
+   closing unmounts the overlay from React state, so there is no exit frame
+   to transition — an animation (not a transition) fits that lifecycle. */
+@keyframes corpus-drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.corpus-drawer {
+  animation: corpus-drawer-in 0.24s ease;
 }
 
 body {

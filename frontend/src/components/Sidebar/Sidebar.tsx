@@ -1,6 +1,7 @@
 import type { Health } from '../../api/client'
 import type { VerticalCorpus } from '../../hooks/useVerticals'
 import { CITARA_VERSION } from '../../version'
+import { QuitButton } from '../chat/QuitButton'
 import { BrandMark } from '../BrandMark'
 import { DomainCard } from '../DomainCard'
 import { ConversationList } from './ConversationList'
@@ -17,6 +18,10 @@ export interface SidebarProps {
   activeConversationId: string | null
   onSelectConversation: (id: string) => void
   onNewConversation: () => void
+  /** "Gestionar corpus" → opens the CorpusDrawer (state in Chat.tsx). */
+  onManageCorpus: () => void
+  /** "Salir de Citara" → opens the QuitDialog (state in Chat.tsx). */
+  onQuit: () => void
 }
 
 /**
@@ -34,11 +39,15 @@ export function Sidebar({
   activeConversationId,
   onSelectConversation,
   onNewConversation,
+  onManageCorpus,
+  onQuit,
 }: SidebarProps) {
   const selected = verticals.find((v) => v.view.id === selectedId) ?? null
 
+  // Width comes from --sidebar-w so the collapse rule (index.css) slides out
+  // by exactly the same distance without duplicating the 296.
   return (
-    <aside className="flex h-full w-[296px] shrink-0 flex-col overflow-y-auto border-r border-border bg-bg2 px-[18px] py-[22px]">
+    <aside className="chat-sidebar flex h-full w-[var(--sidebar-w)] shrink-0 flex-col overflow-y-auto border-r border-border bg-bg2 px-[18px] py-[22px]">
       <div className="mb-[18px] flex items-center gap-[11px] px-1">
         <BrandMark size={38} />
         <div className="leading-[1.15]">
@@ -79,6 +88,7 @@ export function Sidebar({
           ready={selected.documentCount > 0}
           documentCount={selected.documentCount}
           chunkCount={selected.chunkCount}
+          onManage={onManageCorpus}
         />
       )}
 
@@ -91,6 +101,7 @@ export function Sidebar({
 
       <div className="mt-auto border-t border-border px-1 pt-[14px] text-[11px] leading-[1.5] text-faint">
         Citara v{CITARA_VERSION} — todo el procesamiento ocurre en tu equipo.
+        <QuitButton onClick={onQuit} />
       </div>
     </aside>
   )

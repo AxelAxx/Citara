@@ -7,6 +7,9 @@ export interface VerticalCorpus {
   /** Real ingested-corpus stats from /corpus — mock numbers never ship. */
   documentCount: number
   chunkCount: number
+  /** document_ids from the same /corpus response — the CorpusDrawer lists
+      them without a second fetch. */
+  documentIds: string[]
 }
 
 interface UseVerticalsResult {
@@ -30,6 +33,7 @@ export async function loadVerticalCorpora(): Promise<VerticalCorpus[]> {
         view,
         documentCount: stats.document_count,
         chunkCount: stats.chunk_count,
+        documentIds: stats.document_ids,
       }
     }),
   )
