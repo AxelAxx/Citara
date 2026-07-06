@@ -16,8 +16,10 @@ import pytest
 from core.generate import (
     ABSTENTION_TEXT,
     Generator,
+    _parse_anchor_json,
     iter_answer_parts,
     parse_citations,
+    split_into_sentences,
     strip_trailing_abstention,
 )
 from core.models import (
@@ -25,6 +27,7 @@ from core.models import (
     Chunk,
     ChunkMetadata,
     Citation,
+    CiteAnchor,
     CitePart,
     ModelNotPulledError,
     OllamaUnreachableError,
@@ -78,6 +81,26 @@ def _install_chat(monkeypatch, reply: str = "Respuesta basada en el contexto.") 
     return bodies
 
 
+def _install_chat_sequence(monkeypatch, replies: list[str]) -> list[dict]:
+    """Mock requests.post replaying one canned reply PER CALL, in order.
+
+    For two-pass flows (writing pass, then anchor pass): the test scripts each
+    pass's reply and asserts call count via the returned bodies. Any call
+    beyond the scripted replies fails the test loudly — the mechanism behind
+    the "mode off / abstention make NO second call" assertions.
+    """
+    bodies: list[dict] = []
+
+    def fake_post(url, json=None, timeout=None):
+        assert url.endswith("/api/chat")
+        assert len(bodies) < len(replies), "unexpected extra LLM call"
+        bodies.append(json)
+        return _chat_reply(replies[len(bodies) - 1])
+
+    monkeypatch.setattr("requests.post", fake_post)
+    return bodies
+
+
 class _FakeStreamResponse:
     """A /api/chat response consumed as a stream: iter_lines yields NDJSON bytes."""
 
@@ -125,12 +148,14 @@ def _chunk(doc_id: str, page: int, text: str = "texto", **md_extra) -> Chunk:
 def _make_generator(
     system_prompt: str = _SYSTEM_PROMPT,
     document_titles: dict[str, str] | None = None,
+    inline_citation_mode: str = "off",
 ) -> Generator:
     return Generator(
         llm_model="qwen2.5:7b",
         ollama_base_url="http://localhost:11434",
         system_prompt=system_prompt,
         document_titles=document_titles,
+        inline_citation_mode=inline_citation_mode,  # type: ignore[arg-type]
     )
 
 
@@ -448,22 +473,18 @@ def test_paraphrased_trailing_abstention_is_not_stripped():
 
 
 def test_generate_strips_trailing_abstention_from_text_and_parts(monkeypatch):
-    # End-to-end through generate(): Answer.text and Answer.parts are one view —
-    # both lose the appended sentence, neither loses the citation.
+    # End-to-end through generate(): a mixed reply loses the appended sentence
+    # in both views. With markers gone, the strip keys on "not a pure
+    # abstention" instead of cited-ness (the successor rule).
     _install_chat(
-        monkeypatch, reply=f"El plazo es de un mes [1].\n\n{ABSTENTION_TEXT}"
+        monkeypatch, reply=f"El plazo es de un mes.\n\n{ABSTENTION_TEXT}"
     )
     generator = _make_generator()
 
     answer = generator.generate(Query(text="¿plazo?"), [_chunk("doc", 1)])
 
-    assert answer.text == "El plazo es de un mes [1]."
-    assert CitePart(n=1) in answer.parts
-    assert all(
-        ABSTENTION_TEXT not in part.text
-        for part in answer.parts
-        if isinstance(part, TextPart)
-    )
+    assert answer.text == "El plazo es de un mes."
+    assert answer.parts == [TextPart(text="El plazo es de un mes.")]
 
 
 def test_iter_answer_parts_template_literal_split_across_fragments():
@@ -499,13 +520,58 @@ def test_iter_answer_parts_streams_text_before_marker_completes():
     assert next(stream) == TextPart(text="Hola ")
 
 
-def test_generate_remaps_fragment_markers_to_citation_indexes(monkeypatch):
-    # Fragments are numbered per CHUNK (1..3) while citations dedupe by
-    # (document_id, page): [2] cites the duplicated doc-a page and [3] cites
-    # doc-b, so the CiteParts must carry the CITATION indexes (1 and 2) — the
-    # front resolves n → citations[n-1] positionally.
-    _install_chat(monkeypatch, reply="Afirmación [2]. Otra [3].")
-    generator = _make_generator()
+# --- structured citation mode: segmentation, anchoring, assembly --------------
+
+
+def test_split_into_sentences_handles_abbreviations_numbering_and_decimals():
+    text = (
+        "Según el art. 21 de la ley, el plazo es de 3 meses. "
+        "El artículo 38.1 fija 30 días naturales y un margen de 3,5 puntos. "
+        "¿Aplica siempre? Sí."
+    )
+
+    sentences = split_into_sentences(text)
+
+    assert len(sentences) == 4
+    assert sentences[0].startswith("Según el art. 21")  # "art." is no boundary
+    assert "38.1" in sentences[1] and "3,5" in sentences[1]  # numbering intact
+    assert "".join(sentences) == text  # byte-exact rejoin (TextParts invariant)
+
+
+def test_parse_anchor_json_validates_ranges_types_and_dedup():
+    raw = (
+        '{"anchors": ['
+        '{"sentence": 2, "chunk": 1},'
+        '{"sentence": 1, "chunk": 3},'
+        '{"sentence": 1, "chunk": 3},'  # duplicate → collapsed
+        '{"sentence": 9, "chunk": 1},'  # sentence out of range → dropped
+        '{"sentence": 1, "chunk": 0},'  # chunk out of range → dropped
+        '{"sentence": true, "chunk": 1},'  # bool is not a sentence number
+        '"basura"]}'  # non-dict entry → dropped
+    )
+
+    anchors = _parse_anchor_json(raw, num_sentences=2, num_chunks=3)
+
+    assert anchors == [
+        CiteAnchor(sentence_index=1, chunk_index=3),
+        CiteAnchor(sentence_index=2, chunk_index=1),
+    ]
+
+
+def test_parse_anchor_json_malformed_returns_empty_never_raises():
+    assert _parse_anchor_json("esto no es json", 3, 3) == []
+    assert _parse_anchor_json('{"otra_clave": 1}', 3, 3) == []
+    assert _parse_anchor_json('{"anchors": "no-lista"}', 3, 3) == []
+
+
+def test_structured_generate_interleaves_parts_with_dedup_remap(monkeypatch):
+    # Two chunks share (doc-a, 1) → they dedup to citation 1; anchoring the
+    # SECOND chunk must still yield CitePart(n=1) — the same remap table the
+    # marker path used, reused (DRY).
+    prose = "El plazo es de un mes. También hay excepciones."
+    anchors_json = '{"anchors": [{"sentence": 1, "chunk": 2}]}'
+    bodies = _install_chat_sequence(monkeypatch, [prose, anchors_json])
+    generator = _make_generator(inline_citation_mode="structured")
     context = [
         _chunk("doc-a", 1, "primer fragmento"),
         _chunk("doc-a", 1, "segundo fragmento"),
@@ -514,13 +580,70 @@ def test_generate_remaps_fragment_markers_to_citation_indexes(monkeypatch):
 
     answer = generator.generate(Query(text="¿?"), context=context)
 
-    assert len(answer.citations) == 2  # deduped
-    assert [(c.document_id, c.page) for c in answer.citations] == [
-        ("doc-a", 1),
-        ("doc-b", 2),
+    assert len(bodies) == 2  # writing pass + anchor pass, nothing else
+    assert answer.text == prose
+    assert answer.parts == [
+        TextPart(text="El plazo es de un mes."),
+        CitePart(n=1),  # chunk 2 → deduped citation 1
+        TextPart(text=" También hay excepciones."),
     ]
-    cites = [p for p in answer.parts if isinstance(p, CitePart)]
-    assert [c.n for c in cites] == [1, 2]  # fragment [2]→cita 1, [3]→cita 2
+
+
+def test_structured_anchor_failure_degrades_to_no_chips(monkeypatch):
+    # The anchor pass is additive: garbage JSON (or any failure) must yield a
+    # chip-less answer, never a broken one. Sources panel stays intact.
+    prose = "El plazo es de un mes."
+    _install_chat_sequence(monkeypatch, [prose, "esto no es json"])
+    generator = _make_generator(inline_citation_mode="structured")
+
+    answer = generator.generate(Query(text="¿?"), [_chunk("doc", 1)])
+
+    assert answer.text == prose
+    assert answer.parts == [TextPart(text=prose)]
+    assert len(answer.citations) == 1
+
+
+def test_mode_off_makes_no_anchor_call(monkeypatch):
+    # ONE scripted reply: a second /api/chat call fails the test loudly.
+    bodies = _install_chat_sequence(monkeypatch, ["El plazo es de un mes."])
+    generator = _make_generator()  # default "off", mirroring the config default
+
+    answer = generator.generate(Query(text="¿?"), [_chunk("doc", 1)])
+
+    assert len(bodies) == 1
+    assert answer.parts == [TextPart(text="El plazo es de un mes.")]
+    assert len(answer.citations) == 1  # sources panel unaffected by the mode
+
+
+def test_structured_soft_abstention_skips_anchor_pass(monkeypatch):
+    # A soft abstention has nothing to anchor: no second call, phrase intact.
+    bodies = _install_chat_sequence(monkeypatch, [ABSTENTION_TEXT])
+    generator = _make_generator(inline_citation_mode="structured")
+
+    answer = generator.generate(Query(text="¿?"), [_chunk("doc", 1)])
+
+    assert len(bodies) == 1
+    assert answer.text == ABSTENTION_TEXT
+    assert answer.parts == [TextPart(text=ABSTENTION_TEXT)]
+
+
+def test_anchor_request_uses_json_format_and_zero_temperature(monkeypatch):
+    prose = "El plazo es de un mes."
+    bodies = _install_chat_sequence(
+        monkeypatch, [prose, '{"anchors": [{"sentence": 1, "chunk": 1}]}']
+    )
+    generator = _make_generator(inline_citation_mode="structured")
+
+    answer = generator.generate(Query(text="¿?"), [_chunk("doc", 1)])
+
+    anchor_body = bodies[1]
+    # Constrained decoding + zero temperature: anchoring is classification.
+    assert anchor_body["format"] == "json"
+    assert anchor_body["options"]["temperature"] == 0.0
+    # Technical core prompt, not the vertical's system_prompt.
+    assert "verificador de citas" in anchor_body["messages"][0]["content"]
+    # The chip sits right after its full sentence (no trailing whitespace here).
+    assert answer.parts == [TextPart(text=prose), CitePart(n=1)]
 
 
 def test_generate_stream_parts_empty_context_yields_single_abstention_textpart(

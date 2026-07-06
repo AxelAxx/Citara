@@ -43,6 +43,11 @@ document_titles:
   BOE-A-2015-11430: "Real Decreto Legislativo 2/2015, de 23 de octubre, por el que se aprueba el texto refundido de la Ley del Estatuto de los Trabajadores"
   BOE-A-2018-16673: "Ley Orgánica 3/2018, de 5 de diciembre, de Protección de Datos Personales y garantía de los derechos digitales"
 
+# Inline-chip strategy: "structured" = second LLM pass anchors each sentence
+# to its supporting fragment (higher latency per answer, reliable chips);
+# "off" = no inline chips (answer + sources panel only), for modest hardware.
+inline_citation_mode: structured
+
 # Suggested questions for the App's empty chat state (presentation data only).
 # PROPOSED from the ingested corpus — each targets one concrete SourceDocument
 # (estatuto-trabajadores, ley-arrendamientos, constitucion, ley-39-2015); validate
@@ -53,14 +58,14 @@ example_questions:
   - "¿A qué edad se alcanza la mayoría de edad según la Constitución?"
   - "¿Qué plazo tiene la Administración para resolver un procedimiento administrativo?"
 
-# SystemPrompt: enforces Grounding, Abstention, citation format, Spanish output.
+# SystemPrompt: enforces Grounding, Abstention, clean prose, Spanish output.
 # Rules are identical across verticals; only tone/domain framing differs (here:
 # juridical tone, referring to "documentos legales / normativa" instead of
 # "guías clínicas"). The abstention sentence is byte-identical to health.yaml and
 # to the hard guard in core/generate.py (ABSTENTION_TEXT) — do not paraphrase it.
-# The inline [N] markers refer to the 1-based fragment numbers _format_block
-# emits in core/generate.py ("[1] [Documento: ...]"); the notation here and the
-# parser's _MARKER_RE must stay in sync.
+# Citation redesign: the model writes CLEAN prose (no [N] markers); inline
+# citations are anchored afterwards by core's structured anchor pass
+# (inline_citation_mode above), so this prompt carries NO marker rules.
 system_prompt: |
   Eres un asistente que responde preguntas sobre normativa y documentos legales
   españoles (legislación publicada en el BOE), ÚNICAMENTE a partir de los
@@ -80,26 +85,9 @@ system_prompt: |
     al caso.
   - Cuando proceda, refiérete a los artículos o preceptos tal y como aparecen en
     los documentos legales del contexto, sin reinterpretarlos.
-  - El contexto te llega como bloques numerados "[1] [Documento: ...]",
-    "[2] [Documento: ...]", etc. Inmediatamente después de cada afirmación,
-    añade el marcador del fragmento que la sustenta usando EXACTAMENTE
-    corchetes y el número real de ese fragmento. Si una afirmación se apoya
-    en varios fragmentos, encadena los marcadores: [1][3].
-  - SOLO puedes citar fragmentos presentes en el contexto. Nunca escribas un
-    marcador cuyo número no aparezca en el contexto, y si una afirmación no
-    tiene ningún fragmento que la sustente, no le añadas marcador.
-  - NUNCA escribas el literal "[N]" con la letra N: el marcador lleva siempre
-    un número real del contexto.
-  - No repitas el mismo marcador de forma consecutiva ni añadas marcadores
-    sueltos al final de la respuesta: cada afirmación lleva, una sola vez,
-    como mucho los marcadores de los fragmentos que la sustentan.
-  - El marcador es SOLO para citas. No lo confundas con la numeración de
-    apartados del texto legal ("Artículo 38.1", listas "1., 2."): esos NO
-    llevan corchetes ni son marcadores de cita.
-  - Ejemplos: "El descanso anual es de treinta días naturales [1]." es
-    CORRECTO; "...treinta días naturales [N]." es INCORRECTO (plantilla sin
-    número); "El artículo 38.1 establece..." es correcto SIN marcador — ese
-    "1" es un apartado del artículo, no una cita.
+  - Redacta prosa limpia: NO incluyas marcadores de cita, corchetes con
+    números tipo [1] ni notas de referencia — las citas se gestionan fuera
+    de tu texto.
   - No ofrezcas asesoramiento jurídico personalizado ni interpretaciones
     vinculantes. Esto es una demostración sobre documentos públicos, no un
     servicio de asistencia legal profesional.
@@ -115,7 +103,7 @@ system_prompt: |
      Está PROHIBIDO parafrasearla: cópiala carácter a carácter. Sin "Lo
      siento", sin mencionar el tema de la pregunta, sin ofrecer más ayuda.
   3. Solo si algún fragmento contiene la respuesta, redáctala usando
-     únicamente esos fragmentos y sus marcadores [N].
+     únicamente esos fragmentos.
   Nunca pidas disculpas, nunca expliques por qué no puedes responder, nunca
   uses el inglés, nunca respondas desde tu conocimiento. Ejemplo — Pregunta:
   "¿Cuál es la capital de Marte?" Respuesta correcta: "No encuentro esto en

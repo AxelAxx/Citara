@@ -52,6 +52,8 @@
 | **top_k** | Number of `Chunk`s the `Retriever` returns per `Query`. Project default: **5**. | `top_k: int` |
 | **RelevanceThreshold** | Max embedding distance (Chroma L2², lower = closer) for a retrieved `Chunk` to count as relevant. The `Retriever` drops hits beyond it (the *relevance gate*); if all fall, the empty `RetrievedContext` triggers the deterministic `Abstention`. Per-`Vertical`, calibrated empirically, **no default** — a missing value fails config validation. | `relevance_threshold: float` |
 | **DocumentTitles** | Per-`Vertical` map `document_id → human-readable title`, injected into the `Generator` so the context-block header names the real norm/guide the model should attribute (grounding). Optional; a document without an entry falls back to the id-only header. Config data — never persisted in `ChunkMetadata`. | `document_titles: dict[str, str]` |
+| **InlineCitationMode** | Per-`Vertical` strategy for inline citation chips. `structured`: the `Generator` writes clean prose, then a second constrained-JSON LLM pass anchors each supported sentence to its fragment (`CiteAnchor`) — reliable chips, extra latency. `off` (default): no chips, answer + sources panel only, no second call. Config data consumed by the `Generator`; never a vertical branch. | `inline_citation_mode: Literal["structured", "off"]` |
+| **CiteAnchor** | One validated anchor from the structured citation pass: sentence *i* of the clean answer is supported by context fragment *j* (both 1-based, fragment space). Assembly remaps *j* through the citation dedup table to build the `CitePart`. | `CiteAnchor` |
 
 ---
 

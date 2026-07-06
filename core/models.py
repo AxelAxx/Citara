@@ -177,6 +177,30 @@ class CitePart(BaseModel):
 AnswerPart = Annotated[TextPart | CitePart, Field(discriminator="kind")]
 
 
+# How a Vertical produces inline citation chips. "structured": a second LLM
+# pass anchors each sentence to its supporting chunk (reliable chips, extra
+# latency). "off": no inline chips — answer text + sources panel only, zero
+# extra cost. Config data, consumed by the Generator; never a vertical branch.
+InlineCitationMode = Literal["structured", "off"]
+
+
+class CiteAnchor(BaseModel):
+    """One validated anchor from the structured-citation pass (see Generator).
+
+    Sentence ``sentence_index`` of the clean answer is supported by context
+    fragment ``chunk_index`` — both 1-based, matching the numbering the anchor
+    prompt showed the model. Deliberately in FRAGMENT space, not citation
+    space: the dedup remap to ``Answer.citations`` indexes happens at assembly
+    (``_fragment_index_to_citation_index``), the same single remap the [N]
+    marker path used, so the two indexings can never mix.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    sentence_index: int
+    chunk_index: int
+
+
 class Answer(BaseModel):
     """Generator output: the response text plus the Citations it is grounded on.
 
@@ -290,6 +314,10 @@ class VerticalConfig(BaseModel):
     # vertical without titles degrades gracefully to today's id-only header —
     # absence is not a failure (unlike relevance_threshold).
     document_titles: dict[str, str] = Field(default_factory=dict)
+    # Inline-chip strategy (see InlineCitationMode). Default "off" on purpose:
+    # a vertical that does not opt in never pays the second anchor-pass LLM
+    # call — safe degradation to answer + sources panel, today's baseline.
+    inline_citation_mode: InlineCitationMode = "off"
     ollama_base_url: str = "http://localhost:11434"
     # Presentation data consumed by the App's empty chat state (suggested Queries,
     # in Spanish — corpus-facing data, not code). Optional on purpose: a Vertical

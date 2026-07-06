@@ -148,6 +148,9 @@ class RagEngine:
             # Human titles for the context headers — config data, like top_k
             # and relevance_threshold (golden rule 2).
             document_titles=config.document_titles,
+            # Chip strategy per vertical — data too; the Generator consumes
+            # the mode, core never branches on the Vertical itself.
+            inline_citation_mode=config.inline_citation_mode,
         )
         return cls(
             retriever=retriever,

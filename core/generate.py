@@ -42,7 +42,9 @@ from core.models import (
     Answer,
     AnswerPart,
     Citation,
+    CiteAnchor,
     CitePart,
+    InlineCitationMode,
     ModelNotPulledError,
     OllamaUnreachableError,
     Query,
@@ -87,7 +89,181 @@ _TEMPLATE_LITERAL = "[N]"
 _MARKER_PREFIX_RE = re.compile(r"\[(?:\d{0,6}|N)")
 
 
+# --- structured citation anchoring (inline_citation_mode="structured") --------
+# The [N]-marker mechanism below proved intermittent on the 7B (markers appear
+# or vanish per run/phrasing). This section replaces it in two deterministic
+# steps: (1) the Generator writes CLEAN prose (no markers), (2) a second LLM
+# call with format:"json" anchors each sentence to its supporting fragment,
+# validated fail-safe. CiteParts are born from validated anchors, not from the
+# model's marker discipline.
+
+# Spanish abbreviation endings a pragmatic splitter must NOT treat as sentence
+# boundaries ("art. 21", "pág. 4", "p.ej. esto"). Lowercase, dot included;
+# matched against the whitespace-delimited token ending at the candidate dot.
+_ABBREVIATION_ENDINGS = frozenset(
+    {
+        "art.", "arts.", "núm.", "núms.", "apdo.", "apdos.", "pág.", "págs.",
+        "cap.", "caps.", "p.", "ej.", "p.ej.", "vid.", "cfr.", "op.", "cit.",
+        "ss.", "sr.", "sra.", "dr.", "dra.", "d.", "dña.", "etc.",
+    }
+)
+
+# Technical instruction for the anchor pass. Lives in core as a constant, NOT
+# in the vertical YAML: it is machine instruction (JSON in, JSON out), not
+# vertical tone — the same anchoring contract for every Vertical (rule 2).
+_ANCHOR_SYSTEM_PROMPT = (
+    "Eres un verificador de citas para un sistema de recuperación de "
+    "documentos. Recibirás las FRASES numeradas de una respuesta y los "
+    "FRAGMENTOS numerados de los documentos usados para redactarla. Para "
+    "cada frase cuya afirmación esté respaldada por el contenido de un "
+    "fragmento, emite el par frase-fragmento. Una frase puede estar "
+    "respaldada por varios fragmentos (un par por cada uno); omite por "
+    "completo las frases sin respaldo. Responde ÚNICAMENTE con JSON válido, "
+    "sin texto adicional, con esta forma exacta: "
+    '{"anchors": [{"sentence": 1, "chunk": 2}]} '
+    "donde sentence es el número de la frase y chunk el número del fragmento."
+)
+
+
+def split_into_sentences(text: str) -> list[str]:
+    """Deterministic sentence segmentation for the anchor pass.
+
+    Pragmatic by design — the input is the Generator's own es-ES prose, not
+    arbitrary text. A sentence ends at '.', '!' or '?' followed by whitespace,
+    which already keeps decimals ("3,5"), article numbering ("38.1") and any
+    unspaced dot intact; a Spanish abbreviation list catches the spaced false
+    ends ("art. 21"). Each sentence KEEPS its trailing whitespace so
+    ``"".join(result) == text`` holds exactly — the assembled TextParts must
+    reproduce the answer verbatim, byte for byte.
+    """
+    if not text:
+        return []
+    sentences: list[str] = []
+    start = 0
+    i = 0
+    while i < len(text):
+        if text[i] not in ".!?":
+            i += 1
+            continue
+        if text[i] == "." and _ends_with_abbreviation(text, i):
+            i += 1
+            continue
+        j = i + 1
+        # Closing quotes/brackets belong to the sentence they close.
+        while j < len(text) and text[j] in "\"'»”)":
+            j += 1
+        if j < len(text) and not text[j].isspace():
+            # "38.1", "3.5", ids like BOE-A-2015-10565: a dot glued to the next
+            # char is never a boundary.
+            i = j
+            continue
+        while j < len(text) and text[j].isspace():
+            j += 1
+        sentences.append(text[start:j])
+        start = j
+        i = j
+    if start < len(text):
+        sentences.append(text[start:])
+    return sentences
+
+
+def _ends_with_abbreviation(text: str, dot_index: int) -> bool:
+    """Is the dot at ``dot_index`` the end of a known Spanish abbreviation?"""
+    start = dot_index - 1
+    while start >= 0 and not text[start].isspace() and text[start] not in "([«\"'":
+        start -= 1
+    token = text[start + 1 : dot_index + 1].lower()
+    return token in _ABBREVIATION_ENDINGS
+
+
+def _parse_anchor_json(raw: str, num_sentences: int, num_chunks: int) -> list[CiteAnchor]:
+    """Validate the anchor pass's JSON into CiteAnchors — fail-safe by design.
+
+    The anchor pass is ADDITIVE: any failure here degrades to no chips, never
+    a broken answer (rules 3/5 — the grounded text and its sources panel
+    already exist; a chip is enhancement, not integrity). So: unparseable JSON
+    → empty list; a malformed or out-of-range entry → that entry dropped;
+    duplicates collapsed. Bools are rejected explicitly (bool is an int
+    subclass — ``True`` must not pass as sentence 1).
+    """
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return []
+    entries = payload.get("anchors") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        return []
+
+    anchors: list[CiteAnchor] = []
+    seen: set[tuple[int, int]] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        sentence, chunk = entry.get("sentence"), entry.get("chunk")
+        if isinstance(sentence, bool) or isinstance(chunk, bool):
+            continue
+        if not isinstance(sentence, int) or not isinstance(chunk, int):
+            continue
+        if not (1 <= sentence <= num_sentences and 1 <= chunk <= num_chunks):
+            continue
+        key = (sentence, chunk)
+        if key in seen:
+            continue
+        seen.add(key)
+        anchors.append(CiteAnchor(sentence_index=sentence, chunk_index=chunk))
+    # Stable order for assembly: by sentence, preserving the model's order of
+    # chunks within a sentence.
+    anchors.sort(key=lambda anchor: anchor.sentence_index)
+    return anchors
+
+
+def _parts_from_anchors(
+    sentences: list[str],
+    anchors: list[CiteAnchor],
+    fragment_to_citation: list[int],
+) -> list[AnswerPart]:
+    """Interleave sentences and their anchored CiteParts into AnswerParts.
+
+    Each anchored sentence emits its prose, then one CitePart per DISTINCT
+    citation behind it — ``chunk_index`` remaps through the same dedup table
+    the [N] path used (DRY), so two chunks sharing (doc, page) yield one chip.
+    The chip sits right after the prose, before the sentence's trailing
+    whitespace, so it reads attached to the claim it supports. Unanchored
+    sentences stay plain text; adjacent TextParts merge (reused helper), and
+    joining all TextParts reproduces the answer text exactly.
+    """
+    chunks_by_sentence: dict[int, list[int]] = {}
+    for anchor in anchors:
+        chunks_by_sentence.setdefault(anchor.sentence_index, []).append(
+            anchor.chunk_index
+        )
+
+    parts: list[AnswerPart] = []
+    for index, sentence in enumerate(sentences, 1):
+        chunk_indexes = chunks_by_sentence.get(index)
+        if not chunk_indexes:
+            parts.append(TextPart(text=sentence))
+            continue
+        prose = sentence.rstrip()
+        trailing = sentence[len(prose) :]
+        parts.append(TextPart(text=prose))
+        emitted: set[int] = set()
+        for chunk_index in chunk_indexes:
+            n = fragment_to_citation[chunk_index - 1]
+            if n in emitted:
+                continue
+            emitted.add(n)
+            parts.append(CitePart(n=n))
+        if trailing:
+            parts.append(TextPart(text=trailing))
+    return _merge_adjacent_text(parts)
+
+
 # --- inline citation markers → AnswerParts (FR9 / 3b) --------------------------
+# RETAINED for the API's done event, which still resolves parts marker-wise
+# (parse_citations) until the API step of the structured-citation redesign
+# lands. The structured mode above does NOT use this path; once the API and
+# front consume parts_for_text, this section can be removed.
 
 
 def strip_trailing_abstention(text: str) -> str:
@@ -287,6 +463,7 @@ class Generator:
         *,
         temperature: float = _DEFAULT_TEMPERATURE,
         document_titles: dict[str, str] | None = None,
+        inline_citation_mode: InlineCitationMode = "off",
     ) -> None:
         self.llm_model = llm_model
         self.ollama_base_url = ollama_base_url.rstrip("/")
@@ -297,6 +474,11 @@ class Generator:
         # value — plain data, zero vertical branching). Empty dict = today's
         # id-only headers; see _format_block.
         self.document_titles = dict(document_titles or {})
+        # Chip strategy (VerticalConfig.inline_citation_mode): "structured"
+        # pays the anchor pass for reliable chips; "off" (default, mirroring
+        # the config default) skips it entirely. Plain data, no branching by
+        # vertical — the Generator only ever consults the mode.
+        self.inline_citation_mode: InlineCitationMode = inline_citation_mode
 
     # --- the use case --------------------------------------------------------
 
@@ -315,19 +497,16 @@ class Generator:
         # honest set of sources consulted. The Answer invariant then forbids a
         # non-abstaining Answer with no citations, so grounding can't silently slip.
         citations = self._citations_from_context(context)
-        # parts: the same text split for inline chips. Markers are parsed
-        # against the FRAGMENT count and then remapped to citation indexes —
-        # validating against len(citations) directly would misindex (or wrongly
-        # drop) markers whenever two chunks shared (doc, page). Text and parts
-        # come from the ONE resolution site so a stripped trailing abstention
-        # (see strip_trailing_abstention) disappears from both views at once:
-        # ``text`` keeps the raw markers, but never the cited+abstention
-        # contradiction (golden rule 3).
+        # parts: the typed view of the clean prose. In "structured" mode the
+        # anchor pass builds CiteParts from validated sentence↔fragment
+        # anchors (remapped through the dedup table so CitePart.n indexes
+        # Answer.citations); in "off" mode the answer is one TextPart. Both
+        # views come from the ONE resolution site (_resolve_parts), so a
+        # stripped trailing abstention disappears from text and parts at once.
         fragment_to_citation = self._fragment_index_to_citation_index(
             context, citations
         )
-        text, raw_parts = _resolve_final_text(text, num_citations=len(context))
-        parts = list(_remap_cite_indexes(raw_parts, fragment_to_citation))
+        text, parts = self._resolve_parts(text, context, fragment_to_citation)
         return Answer(text=text, citations=citations, parts=parts)
 
     def generate_stream(self, query: Query, context: RetrievedContext) -> Iterator[str]:
@@ -361,28 +540,20 @@ class Generator:
     ) -> Iterator[AnswerPart]:
         """Streaming twin of :meth:`generate` at AnswerPart granularity (3b).
 
-        Wraps :meth:`generate_stream` — whose plain ``Iterator[str]`` contract
-        stays untouched for text-only consumers — with the incremental marker
-        parser: TextParts flow through as the LLM emits them; a CitePart is
-        emitted the moment its complete ``[N]`` closes. The abstention path
-        needs no special-casing: an empty context streams the abstention
-        sentence (no markers) as plain text, and the zero fragment count makes
-        any stray marker unresolvable anyway.
+        With clean-prose generation there are no inline markers to parse: the
+        LIVE view is simply TextParts as fragments arrive (yield-through keeps
+        laziness and fail-fast identical to :meth:`generate_stream`). Anchored
+        CiteParts exist only in the FINAL resolution over the complete text —
+        :meth:`parts_for_text`, which the API's done event serves — because
+        anchoring needs the whole answer. In "structured" mode that second
+        call adds latency between the last streamed token and the parts.
 
-        The trailing-abstention strip does NOT happen here: emitted parts are
-        already on the wire when the tail arrives, so the live stream may still
-        end with the sentence. The authoritative views strip it — the API's
-        ``done`` event re-resolves the full text through ``parse_citations``,
-        and the non-streaming ``generate`` resolves the same way.
+        Neither does the trailing-abstention strip happen here: emitted parts
+        are already on the wire when the tail arrives. The authoritative views
+        strip it (:meth:`parts_for_text` / :meth:`generate`).
         """
-        citations = self._citations_from_context(context)
-        fragment_to_citation = self._fragment_index_to_citation_index(
-            context, citations
-        )
-        yield from _remap_cite_indexes(
-            iter_answer_parts(self.generate_stream(query, context), len(context)),
-            fragment_to_citation,
-        )
+        for fragment in self.generate_stream(query, context):
+            yield TextPart(text=fragment)
 
     def citations_for_context(self, context: RetrievedContext) -> list[Citation]:
         """Public seam to derive the Citations behind a context (FR9 / AC2).
@@ -394,6 +565,119 @@ class Generator:
         path derives — same logic, one source of truth.
         """
         return self._citations_from_context(context)
+
+    # --- final resolution: clean text → typed parts (both citation modes) ----
+
+    def parts_for_text(
+        self, text: str, context: RetrievedContext
+    ) -> tuple[str, list[AnswerPart]]:
+        """Resolve a COMPLETED reply into (final text, typed parts) — the one
+        public seam for the streaming close.
+
+        Same logic :meth:`generate` uses; exposed so the API's done event can
+        resolve the accumulated streamed text identically (one source of
+        truth, no marker parsing anywhere else). In "structured" mode this is
+        where the anchor pass runs — the latency between the last token and
+        the parts.
+        """
+        citations = self._citations_from_context(context)
+        fragment_to_citation = self._fragment_index_to_citation_index(
+            context, citations
+        )
+        return self._resolve_parts(text, context, fragment_to_citation)
+
+    def _resolve_parts(
+        self,
+        text: str,
+        context: RetrievedContext,
+        fragment_to_citation: list[int],
+    ) -> tuple[str, list[AnswerPart]]:
+        """THE single final-resolution site for clean-prose replies.
+
+        Order matters: the trailing-abstention strip runs FIRST, so a mixed
+        reply never reaches segmentation with the contradiction attached. With
+        markers gone, cited-ness can no longer gate that strip (the old rule);
+        the successor rule is: strip a trailing occurrence unless the phrase
+        IS the whole reply — a pure soft abstention stays intact, never
+        emptied (rule 3).
+        """
+        stripped = strip_trailing_abstention(text)
+        if stripped.strip():
+            text = stripped
+
+        if self.inline_citation_mode != "structured":
+            # "off": no anchor pass, no chips, zero extra latency. The sources
+            # panel still works — Answer.citations derive from context.
+            return text, [TextPart(text=text)]
+        if text.strip() == ABSTENTION_TEXT:
+            # Soft abstention: nothing to anchor; spending a second LLM call
+            # to confirm "no support" would be waste by construction.
+            return text, [TextPart(text=text)]
+
+        sentences = split_into_sentences(text)
+        anchors = self.anchor_citations(sentences, context)
+        if not anchors:
+            # Degraded (anchor pass failed or found nothing): answer without
+            # chips, never a broken answer.
+            return text, [TextPart(text=text)]
+        return text, _parts_from_anchors(sentences, anchors, fragment_to_citation)
+
+    # --- the anchor pass (inline_citation_mode="structured") -----------------
+
+    def anchor_citations(
+        self, sentences: list[str], context: RetrievedContext
+    ) -> list[CiteAnchor]:
+        """Second LLM pass: anchor each supported sentence to its fragment.
+
+        Sends numbered sentences + the SAME numbered fragment blocks the
+        writing pass saw, constrained to JSON output (Ollama ``format:"json"``,
+        temperature 0 — anchoring is classification, not writing), then
+        validates deterministically (:func:`_parse_anchor_json`). ADDITIVE by
+        contract: any failure — transport, HTTP, malformed JSON — degrades to
+        no anchors (no chips), never a broken answer (rules 3/5). The primary
+        reply already succeeded moments earlier, so swallowing a transient
+        anchor failure hides no persistent outage: check_health still surfaces
+        a down server loudly.
+        """
+        if not sentences or not context:
+            return []
+        try:
+            raw = self._chat_once(
+                [
+                    {"role": "system", "content": _ANCHOR_SYSTEM_PROMPT},
+                    {"role": "user", "content": self._build_anchor_prompt(sentences, context)},
+                ],
+                format_json=True,
+                temperature=0.0,
+            )
+        except RagEngineError:
+            return []
+        return _parse_anchor_json(
+            raw, num_sentences=len(sentences), num_chunks=len(context)
+        )
+
+    def _build_anchor_prompt(
+        self, sentences: list[str], context: RetrievedContext
+    ) -> str:
+        """The anchor pass's user turn: numbered sentences + numbered fragments.
+
+        Fragments reuse :meth:`_format_block` verbatim so the anchor model sees
+        exactly the numbering (and human titles) the writing pass saw — one
+        fragment indexing across both calls, no second numbering scheme.
+        """
+        numbered = "\n".join(
+            f"{index}. {sentence.strip()}"
+            for index, sentence in enumerate(sentences, 1)
+        )
+        blocks = "\n\n".join(
+            self._format_block(index, chunk)
+            for index, chunk in enumerate(context, 1)
+        )
+        return (
+            f"FRASES DE LA RESPUESTA:\n{numbered}\n\n"
+            f"FRAGMENTOS DE LOS DOCUMENTOS:\n{blocks}\n\n"
+            "Devuelve el JSON de anclajes."
+        )
 
     # --- grounded prompt assembly (FR7) --------------------------------------
 
@@ -580,20 +864,39 @@ class Generator:
         ``embed.py`` (see the module docstring): the ``ChatOllama`` path is
         brittle across LangChain versions, so we speak the documented HTTP API.
         """
+        return self._chat_once(
+            [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            # Low temperature keeps generation hugging the grounding context.
+            temperature=self.temperature,
+        )
+
+    def _chat_once(
+        self,
+        messages: list[dict],
+        *,
+        temperature: float,
+        format_json: bool = False,
+    ) -> str:
+        """One non-streamed /api/chat call — shared by the writing pass and the
+        anchor pass, so both speak the same endpoint with the same fail-fast
+        error mapping. ``format_json=True`` sets Ollama's native ``format:
+        "json"`` (constrained decoding), used only by the anchor pass.
+        """
         requests = self._http()
         url = f"{self.ollama_base_url}/api/chat"
         body = {
             "model": self.llm_model,
-            "messages": [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            "messages": messages,
             # Non-streamed: we want the whole reply in one JSON response, not a
             # token stream to reassemble.
             "stream": False,
-            # Low temperature keeps generation hugging the grounding context.
-            "options": {"temperature": self.temperature},
+            "options": {"temperature": temperature},
         }
+        if format_json:
+            body["format"] = "json"
         try:
             response = requests.post(url, json=body, timeout=_CHAT_TIMEOUT_SECONDS)
         except (requests.exceptions.RequestException, OSError) as exc:

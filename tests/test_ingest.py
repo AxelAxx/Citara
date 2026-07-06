@@ -60,6 +60,9 @@ def test_config_without_document_titles_defaults_to_empty_mapping(tmp_path):
     config = _make_config(tmp_path)
 
     assert config.document_titles == {}
+    # Same graceful-default philosophy for the chip strategy: not opting in
+    # means no second LLM call, never a validation failure.
+    assert config.inline_citation_mode == "off"
 
 
 def test_config_without_relevance_threshold_fails_validation(tmp_path):

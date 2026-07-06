@@ -222,6 +222,8 @@ def test_from_vertical_config_wires_collection_name_per_vertical():
     # document_titles flows config → Generator (empty default here): the same
     # plain-data injection as every other config value, no vertical branch.
     assert health._generator.document_titles == {}
+    # inline_citation_mode flows the same way (default "off" in this config).
+    assert health._generator.inline_citation_mode == "off"
 
     # Same embedding model centralized in config feeds both engines' Embedders.
     assert health._retriever._embedder.model_name == "bge-m3"
