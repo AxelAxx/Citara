@@ -219,6 +219,10 @@ def test_from_vertical_config_wires_collection_name_per_vertical():
     assert health._generator.system_prompt == "Eres un asistente clínico."
     assert legal._generator.system_prompt == "Eres un asistente legal."
 
+    # document_titles flows config → Generator (empty default here): the same
+    # plain-data injection as every other config value, no vertical branch.
+    assert health._generator.document_titles == {}
+
     # Same embedding model centralized in config feeds both engines' Embedders.
     assert health._retriever._embedder.model_name == "bge-m3"
     assert legal._retriever._embedder.model_name == "bge-m3"

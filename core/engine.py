@@ -145,6 +145,9 @@ class RagEngine:
             llm_model=config.llm_model,
             ollama_base_url=config.ollama_base_url,
             system_prompt=config.system_prompt,
+            # Human titles for the context headers — config data, like top_k
+            # and relevance_threshold (golden rule 2).
+            document_titles=config.document_titles,
         )
         return cls(
             retriever=retriever,

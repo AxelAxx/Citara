@@ -122,11 +122,15 @@ def _chunk(doc_id: str, page: int, text: str = "texto", **md_extra) -> Chunk:
     )
 
 
-def _make_generator(system_prompt: str = _SYSTEM_PROMPT) -> Generator:
+def _make_generator(
+    system_prompt: str = _SYSTEM_PROMPT,
+    document_titles: dict[str, str] | None = None,
+) -> Generator:
     return Generator(
         llm_model="qwen2.5:7b",
         ollama_base_url="http://localhost:11434",
         system_prompt=system_prompt,
+        document_titles=document_titles,
     )
 
 
@@ -177,6 +181,51 @@ def test_prompt_contains_formatted_blocks_with_document_id_and_page(monkeypatch)
     assert "[Documento: guia-salud-01, pág. 3]" in prompt
     assert "Recomendación clínica." in prompt
     assert "¿cuál es el plazo?" in prompt  # the Query is in the prompt
+
+
+# --- grounding: human document title in the context-block header --------------
+
+
+def test_context_header_carries_human_title_and_keeps_document_id(monkeypatch):
+    bodies = _install_chat(monkeypatch)
+    generator = _make_generator(
+        document_titles={
+            "BOE-A-2015-10565": "Ley 39/2015, del Procedimiento Administrativo Común"
+        }
+    )
+
+    generator.generate(
+        Query(text="¿plazo?"), context=[_chunk("BOE-A-2015-10565", 61)]
+    )
+
+    prompt = bodies[0]["messages"][1]["content"]
+    # Title leads, id stays: the title is what the model should attribute; the
+    # document_id remains the Citation anchor and is never dropped.
+    assert (
+        "[Documento: Ley 39/2015, del Procedimiento Administrativo Común — "
+        "BOE-A-2015-10565, pág. 61]" in prompt
+    )
+
+
+def test_context_header_falls_back_to_id_only_without_title(monkeypatch):
+    bodies = _install_chat(monkeypatch)
+    # Mapping exists but does NOT know this document — per-document fallback.
+    generator = _make_generator(document_titles={"otro-doc": "Otro título"})
+
+    generator.generate(Query(text="x"), context=[_chunk("BOE-A-2015-10565", 61)])
+
+    prompt = bodies[0]["messages"][1]["content"]
+    assert "[Documento: BOE-A-2015-10565, pág. 61]" in prompt  # today's exact format
+    assert "Otro título" not in prompt
+
+
+def test_context_header_without_any_titles_matches_todays_format(monkeypatch):
+    bodies = _install_chat(monkeypatch)
+    generator = _make_generator()  # no document_titles at all (default)
+
+    generator.generate(Query(text="x"), context=[_chunk("doc-a", 7)])
+
+    assert "[Documento: doc-a, pág. 7]" in bodies[0]["messages"][1]["content"]
 
 
 # --- FR9 / AC2: citations derive from context, with dedup --------------------

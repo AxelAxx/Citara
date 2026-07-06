@@ -286,11 +286,17 @@ class Generator:
         system_prompt: str,
         *,
         temperature: float = _DEFAULT_TEMPERATURE,
+        document_titles: dict[str, str] | None = None,
     ) -> None:
         self.llm_model = llm_model
         self.ollama_base_url = ollama_base_url.rstrip("/")
         self.system_prompt = system_prompt
         self.temperature = temperature
+        # document_id → human title for the context-block header (from
+        # VerticalConfig.document_titles, injected like every other config
+        # value — plain data, zero vertical branching). Empty dict = today's
+        # id-only headers; see _format_block.
+        self.document_titles = dict(document_titles or {})
 
     # --- the use case --------------------------------------------------------
 
@@ -406,15 +412,26 @@ class Generator:
             f"Pregunta: {query.text}"
         )
 
-    @staticmethod
-    def _format_block(index: int, chunk) -> str:
+    def _format_block(self, index: int, chunk) -> str:
         """One citable context block: provenance header + text.
 
         Uses the document_id and page guaranteed on every ChunkMetadata so the
-        model can attribute claims to a real SourceDocument and page.
+        model can attribute claims to a real SourceDocument and page. When the
+        vertical's ``document_titles`` knows this document, the human title
+        leads the header: an opaque id alone ("BOE-A-2015-10565") gives the
+        model no citable norm name, and it fills the gap from pretraining —
+        the observed "RD-Ley 3/2012" misattribution. The document_id stays in
+        the header regardless: it is the Citation anchor, never dropped. A
+        document without a title entry falls back to today's id-only header.
         """
         md = chunk.metadata
-        return f"[{index}] [Documento: {md.document_id}, pág. {md.page}]\n{chunk.text}"
+        title = self.document_titles.get(md.document_id)
+        if title is None:
+            return f"[{index}] [Documento: {md.document_id}, pág. {md.page}]\n{chunk.text}"
+        return (
+            f"[{index}] [Documento: {title} — {md.document_id}, "
+            f"pág. {md.page}]\n{chunk.text}"
+        )
 
     # --- citations (FR9 / AC2) ----------------------------------------------
 

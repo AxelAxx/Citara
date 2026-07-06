@@ -51,6 +51,7 @@
 | **chunk_overlap** | Tokens shared between adjacent `Chunk`s. Project default: **90** (~15%). | `chunk_overlap: int` |
 | **top_k** | Number of `Chunk`s the `Retriever` returns per `Query`. Project default: **5**. | `top_k: int` |
 | **RelevanceThreshold** | Max embedding distance (Chroma L2², lower = closer) for a retrieved `Chunk` to count as relevant. The `Retriever` drops hits beyond it (the *relevance gate*); if all fall, the empty `RetrievedContext` triggers the deterministic `Abstention`. Per-`Vertical`, calibrated empirically, **no default** — a missing value fails config validation. | `relevance_threshold: float` |
+| **DocumentTitles** | Per-`Vertical` map `document_id → human-readable title`, injected into the `Generator` so the context-block header names the real norm/guide the model should attribute (grounding). Optional; a document without an entry falls back to the id-only header. Config data — never persisted in `ChunkMetadata`. | `document_titles: dict[str, str]` |
 
 ---
 

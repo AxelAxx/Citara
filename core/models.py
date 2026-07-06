@@ -281,6 +281,15 @@ class VerticalConfig(BaseModel):
     # overlap), so a silent global fallback would miscalibrate or disable the
     # gate — a missing value must fail loudly at config load (golden rule 5).
     relevance_threshold: float = Field(gt=0.0)
+    # Maps document_id → human-readable title for the context-block header, so
+    # the LLM has the real norm/guide name to attribute instead of hallucinating
+    # one from an opaque id (grounding). Data per vertical (golden rule 2),
+    # sourced from PDF metadata where reliable + curated by hand; deliberately
+    # NOT persisted in ChunkMetadata — it stays out of the ingestion/embedding
+    # path, so no re-ingest and no Chroma change. OPTIONAL on purpose: a
+    # vertical without titles degrades gracefully to today's id-only header —
+    # absence is not a failure (unlike relevance_threshold).
+    document_titles: dict[str, str] = Field(default_factory=dict)
     ollama_base_url: str = "http://localhost:11434"
     # Presentation data consumed by the App's empty chat state (suggested Queries,
     # in Spanish — corpus-facing data, not code). Optional on purpose: a Vertical

@@ -54,6 +54,14 @@ def _make_config(tmp_path, vertical: Vertical = Vertical.HEALTH) -> VerticalConf
     )
 
 
+def test_config_without_document_titles_defaults_to_empty_mapping(tmp_path):
+    # Optional on purpose (unlike relevance_threshold): a vertical without
+    # titles is not broken — the Generator falls back to id-only headers.
+    config = _make_config(tmp_path)
+
+    assert config.document_titles == {}
+
+
 def test_config_without_relevance_threshold_fails_validation(tmp_path):
     # Deliberately NO default (golden rule 5): a YAML missing the relevance gate
     # must fail loudly at load, never fall back to a value that silently

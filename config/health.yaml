@@ -28,6 +28,24 @@ top_k: 6
 # higher and its viable range doesn't overlap this one.
 relevance_threshold: 0.90
 
+# Human-readable title per document_id, used in the prompt's context-block
+# header ("[Documento: <título> — <id>, pág. N]") so the model attributes the
+# REAL guide instead of inventing a name from the opaque slug. Fallback: a
+# document_id without an entry here renders id-only (today's behaviour).
+# Source: curated from each guide's own cover/credits pages (the embedded PDF
+# metadata is empty or junk in this corpus — measured).
+document_titles:
+  ansiedad: "Guía de Práctica Clínica para el Manejo de Pacientes con Trastornos de Ansiedad en Atención Primaria"
+  asma: "GEMA 2009. Guía española para el manejo del asma"
+  cancer-colorrectal-cribado: "Guía de Práctica Clínica de Prevención del Cáncer Colorrectal"
+  depresion: "Guía de Práctica Clínica sobre el Manejo de la Depresión en el Adulto"
+  diabetes-tipo-2: "Guía de Práctica Clínica sobre Diabetes tipo 2"
+  embarazo-parto: "Guía de práctica clínica de atención en el embarazo y puerperio"
+  epoc: "Guía de Práctica Clínica para el Diagnóstico y Tratamiento de Pacientes con Enfermedad Pulmonar Obstructiva Crónica (EPOC)"
+  hipertension: "Guía de práctica clínica sobre Hipertensión Arterial"
+  ictus: "Guía de Práctica Clínica sobre la Prevención Primaria y Secundaria del Ictus"
+  insuficiencia-cardiaca: "Guía de Práctica Clínica sobre Tratamiento de la Insuficiencia Cardiaca Crónica"
+
 # Suggested questions for the App's empty chat state (presentation data only).
 # PROPOSED from the ingested corpus — each targets one concrete SourceDocument
 # (hipertension, diabetes-tipo-2, epoc, ictus); the hipertension one is already
