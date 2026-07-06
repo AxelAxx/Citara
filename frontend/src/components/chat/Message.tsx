@@ -137,6 +137,22 @@ export function Message({ message, abstentionText }: MessageProps) {
           <>
             {/* On 'error' any partial text stays visible above the card. */}
             {message.text !== '' && body}
+            {/* The anchoring gap (structured mode): tokens are done, the
+                answer is fully readable above, and the server is running the
+                citation anchor pass (~4-5s). A quiet working line justifies
+                the wait; NO placeholder chips — we don't know where they land
+                until done, and faking positions would be lying. The phase
+                only exists when the gap is real (silence watchdog in
+                useChat), so off/abstention never show this. */}
+            {message.phase === 'anchoring' && (
+              <div className="mt-[10px] flex items-center gap-2 font-mono text-[11px] text-[color:var(--muted)]">
+                <span
+                  aria-hidden="true"
+                  className="h-[6px] w-[6px] animate-pulse rounded-full bg-[color:var(--accent)]"
+                />
+                Verificando fuentes…
+              </div>
+            )}
             {message.phase === 'error' && (
               <div className={`rounded-md border border-warn-line bg-warn-tint px-4 py-3 font-mono text-xs text-warn ${message.text !== '' ? 'mt-3' : ''}`}>
                 {message.error}
