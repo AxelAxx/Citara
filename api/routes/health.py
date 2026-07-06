@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from core.generate import ABSTENTION_TEXT
 from core.ingest import load_vertical_config
 from core.models import RagEngineError, Vertical
 
@@ -40,5 +41,10 @@ def health() -> JSONResponse:
             "llm_model": config.llm_model,
             "embedding_model": config.embedding_model,
             "ollama_base_url": config.ollama_base_url,
+            # The exact abstention literal, published so the front's transient
+            # streaming cleanup uses core's single source of truth instead of
+            # duplicating the phrase (it is UI copy AND a domain constant).
+            # Cosmetic use only — abstention is DECIDED by the done event.
+            "abstention_text": ABSTENTION_TEXT,
         }
     )

@@ -33,9 +33,13 @@
 Aggregated preflight — backs the sidebar "Conectado a Ollama" badge.
 Wraps `RagEngine.check_health()` for the active/default vertical.
 
-- **200** `{ "ok": true, "llm_model": "qwen2.5:7b", "embedding_model": "bge-m3", "ollama_base_url": "http://localhost:11434" }`
+- **200** `{ "ok": true, "llm_model": "qwen2.5:7b", "embedding_model": "bge-m3", "ollama_base_url": "http://localhost:11434", "abstention_text": "No encuentro esto en los documentos proporcionados." }`
 - **503** `{ "ok": false, "error_code": "ollama_unreachable", "message": "<actionable>" }`
   - `error_code` ∈ `ollama_unreachable | model_not_pulled` (from the `RagEngineError` subtype).
+  - `abstention_text` is the exact abstention literal (source of truth:
+    `core.generate.ABSTENTION_TEXT`). Clients may use it for cosmetic streaming cleanup
+    (hiding the phrase while tokens arrive) — NEVER to decide abstention: the `done`
+    event's `is_abstention`/`suppress_citations` own that resolution.
 
 ### `GET /api/verticals`
 Lists the configured verticals + their presentation config. Backs the welcome cards and

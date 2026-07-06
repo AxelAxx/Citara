@@ -47,6 +47,10 @@ export type Health =
       llm_model: string
       embedding_model: string
       ollama_base_url: string
+      // The exact abstention literal (source of truth: core.generate
+      // .ABSTENTION_TEXT, published by /health). Used ONLY for the cosmetic
+      // streaming cleanup — the done event decides abstention.
+      abstention_text: string
     }
   | ({ ok: false } & ApiErrorBody)
 

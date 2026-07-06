@@ -157,7 +157,13 @@ export function Chat({ verticalId, verticals, health }: ChatProps) {
           <div className="flex-1 overflow-y-auto px-[34px] py-8">
             <div className="mx-auto flex w-full max-w-[760px] flex-col gap-[26px]">
               {messages.map((message, index) => (
-                <Message key={index} message={message} />
+                <Message
+                  key={index}
+                  message={message}
+                  // The abstention literal published by /health (core's single
+                  // source of truth) — feeds the transient streaming cleanup.
+                  abstentionText={health.ok ? health.abstention_text : null}
+                />
               ))}
               <div ref={bottomRef} />
             </div>

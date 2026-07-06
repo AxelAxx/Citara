@@ -9,8 +9,10 @@ interface UseHealthResult {
 }
 
 /**
- * Load /health once (llm_model for the version pill, and later the sidebar
- * badge). getHealth resolves for ok:false bodies too — those carry their own
+ * Load /health once (llm_model for the version pill, the sidebar badge, and
+ * abstention_text — core's abstention literal, consumed by Message's transient
+ * streaming cleanup; loaded at startup so it's ready before the first stream).
+ * getHealth resolves for ok:false bodies too — those carry their own
  * actionable error_code/message — so `error` here is transport-level only
  * (API process unreachable).
  */
