@@ -13,27 +13,26 @@ import { ThinkingIndicator } from './ThinkingIndicator'
 export interface MessageProps {
   message: ChatMessage
   /** The abstention literal from /health (core's single source of truth),
-      used only by the transient streaming cleanup. null (not yet loaded, or
-      health ok:false) degrades gracefully: only raw [N] markers are hidden. */
+      used only by the transient streaming cleanup below. null (not yet
+      loaded, or health ok:false) degrades gracefully: no live cleanup. */
   abstentionText: string | null
 }
 
-// Transient cosmetic cleanup for the LIVE stream only: raw "[1]" markers (and
-// the echoed "[N]" template, and an unfinished trailing "[1" whose "]" hasn't
-// arrived) are hidden so marker syntax never flashes while the model writes.
-// Nothing is validated and no chips are built here — the authoritative render
-// comes from the done event's `parts`, parsed and validated by core.
-const RAW_MARKER_RE = /\[(?:\d+|N)\]/g
-const TRAILING_PARTIAL_MARKER_RE = /\[(?:\d+|N)?$/
-
-// The 7B sometimes appends the abstention sentence after a cited answer; core
-// strips it from the final parts, but its tokens still stream in live. Hiding
-// a trailing PREFIX of the sentence (it arrives token by token) keeps it from
-// flashing mid-write; if more prose follows, the run is no longer trailing and
-// reappears — cosmetic and self-correcting, like the marker hide above. The
-// literal arrives from /health (core's single source of truth) — never
-// redefined here.
-function hideTrailingAbstention(text: string, abstentionText: string): string {
+// The ONLY transient cleanup left for the LIVE stream. Since the citation
+// redesign the model writes clean prose — no raw [N] markers can arrive, so
+// the old marker-hiding regexes are gone. What CAN still stream in is the
+// abstention sentence appended after a real answer (the 7B's mixed failure
+// mode): core strips it from the FINAL view (the done event's parts), but its
+// tokens hit the wire live. Hiding a trailing PREFIX of the sentence (it
+// arrives token by token) keeps it from flashing mid-write; if more prose
+// follows, the run is no longer trailing and reappears — cosmetic and
+// self-correcting. The literal arrives from /health (core's single source of
+// truth) — never redefined here; null (still loading) → no cleanup, harmless.
+function hideTrailingAbstention(
+  text: string,
+  abstentionText: string | null,
+): string {
+  if (abstentionText === null) return text
   const trimmed = text.trimEnd()
   const max = Math.min(abstentionText.length, trimmed.length)
   for (let len = max; len > 0; len--) {
@@ -41,24 +40,13 @@ function hideTrailingAbstention(text: string, abstentionText: string): string {
       // trimEnd: drop the blank lines that preceded the hidden sentence too,
       // so the live cursor doesn't sit under a stray empty paragraph.
       const remaining = trimmed.slice(0, trimmed.length - len).trimEnd()
-      // Mirror of core's cited-only rule: hide the sentence only when prose
-      // precedes it. A PURE abstention (the sentence alone, e.g. the guard
-      // path) must stay visible — hiding it would blank the whole message.
+      // Mirror of core's rule: hide the sentence only when prose precedes
+      // it. A PURE abstention (the sentence alone, e.g. the guard path)
+      // must stay visible — hiding it would blank the whole message.
       return remaining === '' ? text : remaining
     }
   }
   return text
-}
-
-function hideRawMarkers(text: string, abstentionText: string | null): string {
-  const noMarkers = text
-    .replace(RAW_MARKER_RE, '')
-    .replace(TRAILING_PARTIAL_MARKER_RE, '')
-  // No phrase yet (health still loading, or ok:false) → markers-only cleanup.
-  // Graceful: this hide is cosmetic, its momentary absence breaks nothing.
-  return abstentionText === null
-    ? noMarkers
-    : hideTrailingAbstention(noMarkers, abstentionText)
 }
 
 // The final render: a straight map over core's typed parts — no marker
@@ -114,15 +102,15 @@ export function Message({ message, abstentionText }: MessageProps) {
   const focusSource = (n: number) =>
     setSourceFocus((prev) => ({ n, key: (prev?.key ?? 0) + 1 }))
 
-  // Two render modes by phase: while writing, the accumulated raw text with
-  // markers cosmetically hidden; on done, the typed parts (chips in place,
-  // text already stripped of the abstention tail by core). Plain cleaned text
-  // stays as the fallback for 'error' partials and a done without parts.
+  // Two render modes by phase: while writing, the accumulated clean prose
+  // (only a trailing abstention run is transiently hidden); on done, the
+  // typed parts (chips anchored by core, text already tail-stripped). Plain
+  // text stays as the fallback for 'error' partials and a done without parts.
   const body = (
     <div className="text-[15px] leading-[1.72] text-text">
       {message.phase === 'done' && message.parts
         ? renderParts(message.parts, msgId, focusSource)
-        : hideRawMarkers(message.text, abstentionText)}
+        : hideTrailingAbstention(message.text, abstentionText)}
       {message.phase === 'writing' && (
         <span
           aria-hidden="true"

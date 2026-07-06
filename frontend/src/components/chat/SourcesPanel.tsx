@@ -14,7 +14,7 @@ export interface SourceFocus {
  * Presentational: renders whatever citations it is handed, numbered in
  * arrival order (the same order the inline ¹ chips use). The "Abrir
  * fragmento" source viewer (mock 09) is deliberately deferred — the snippet
- * shows chunk_text inline.
+ * shows a truncated lead-in of chunk_text, expandable per card.
  */
 export interface SourcesPanelProps {
   citations: Citation[]
@@ -22,6 +22,40 @@ export interface SourcesPanelProps {
   msgId?: string
   /** Inline chip click: unfold, scroll to and flash card n. */
   focus?: SourceFocus | null
+}
+
+// Full chunk_text is ~600 chars (chunk_size) — rendered whole it is a wall of
+// text that buries the next source card. Show a lead-in, expand on demand;
+// the full text is never lost, it sits behind the toggle.
+const SNIPPET_LEAD_CHARS = 160
+
+function leadIn(text: string): string {
+  if (text.length <= SNIPPET_LEAD_CHARS) return text
+  // Cut at the last space before the limit so the ellipsis never splits a word.
+  const lastSpace = text.lastIndexOf(' ', SNIPPET_LEAD_CHARS)
+  return `${text.slice(0, lastSpace > 0 ? lastSpace : SNIPPET_LEAD_CHARS)}…`
+}
+
+function SourceSnippet({ text }: { text: string }) {
+  // Local state per card: expanding one source never unfolds its siblings.
+  const [expanded, setExpanded] = useState(false)
+  const truncated = text.length > SNIPPET_LEAD_CHARS
+  return (
+    <>
+      <div className="border-l-2 border-accent-line pl-[11px] font-serif text-[13.5px] italic leading-[1.6] text-muted">
+        «{expanded || !truncated ? text : leadIn(text)}»
+      </div>
+      {truncated && (
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="mt-[6px] font-mono text-[10.5px] text-[color:var(--accent)] transition-colors hover:text-[color:var(--text)]"
+        >
+          {expanded ? 'Ocultar fragmento' : 'Ver fragmento completo'}
+        </button>
+      )}
+    </>
+  )
 }
 
 export function SourcesPanel({ citations, msgId, focus }: SourcesPanelProps) {
@@ -112,9 +146,7 @@ export function SourcesPanel({ citations, msgId, focus }: SourcesPanelProps) {
                     </span>
                   )}
                 </div>
-                <div className="border-l-2 border-accent-line pl-[11px] font-serif text-[13.5px] italic leading-[1.6] text-muted">
-                  «{citation.chunk_text}»
-                </div>
+                <SourceSnippet text={citation.chunk_text} />
               </div>
             </div>
           ))}
