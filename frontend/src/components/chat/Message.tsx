@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
+import type { AnswerPart } from '../../api/client'
 import type { Message as ChatMessage } from '../../hooks/useChat'
 import { BrandMark } from '../BrandMark'
 import { AbstentionNote } from './AbstentionNote'
@@ -13,47 +14,72 @@ export interface MessageProps {
   message: ChatMessage
 }
 
-// The 7B model emits [N] markers inline in the answer text; valid ones render
-// as CiteChips in place and malformed/out-of-range ones ([12] with 5 sources,
-// a verbatim "[N]") are dropped whole — a marker without a real source behind
-// it is model garbage, not a citation. While streaming, an unfinished "[1"
-// stays plain text until its "]" arrives (only COMPLETE markers parse).
-// NOTE: this parsing lives here TEMPORARILY as a pragmatic shortcut — it
-// moves into core (AnswerParts) with the full 3b step.
-const MARKER_RE = /\[(\d+|N)\]/g
+// Transient cosmetic cleanup for the LIVE stream only: raw "[1]" markers (and
+// the echoed "[N]" template, and an unfinished trailing "[1" whose "]" hasn't
+// arrived) are hidden so marker syntax never flashes while the model writes.
+// Nothing is validated and no chips are built here — the authoritative render
+// comes from the done event's `parts`, parsed and validated by core.
+const RAW_MARKER_RE = /\[(?:\d+|N)\]/g
+const TRAILING_PARTIAL_MARKER_RE = /\[(?:\d+|N)?$/
 
-function renderTextWithCites(
-  text: string,
-  numCitations: number,
+// Byte-identical to core.generate.ABSTENTION_TEXT (see docs/API_CONTRACT.md).
+// Used ONLY for the transient hide below — never to decide abstention (the
+// done event's flags own that decision).
+const ABSTENTION_TEXT = 'No encuentro esto en los documentos proporcionados.'
+
+// The 7B sometimes appends the abstention sentence after a cited answer; core
+// strips it from the final parts, but its tokens still stream in live. Hiding
+// a trailing PREFIX of the sentence (it arrives token by token) keeps it from
+// flashing mid-write; if more prose follows, the run is no longer trailing and
+// reappears — cosmetic and self-correcting, like the marker hide above.
+function hideTrailingAbstention(text: string): string {
+  const trimmed = text.trimEnd()
+  const max = Math.min(ABSTENTION_TEXT.length, trimmed.length)
+  for (let len = max; len > 0; len--) {
+    if (trimmed.endsWith(ABSTENTION_TEXT.slice(0, len))) {
+      // trimEnd: drop the blank lines that preceded the hidden sentence too,
+      // so the live cursor doesn't sit under a stray empty paragraph.
+      const remaining = trimmed.slice(0, trimmed.length - len).trimEnd()
+      // Mirror of core's cited-only rule: hide the sentence only when prose
+      // precedes it. A PURE abstention (the sentence alone, e.g. the guard
+      // path) must stay visible — hiding it would blank the whole message.
+      return remaining === '' ? text : remaining
+    }
+  }
+  return text
+}
+
+function hideRawMarkers(text: string): string {
+  return hideTrailingAbstention(
+    text.replace(RAW_MARKER_RE, '').replace(TRAILING_PARTIAL_MARKER_RE, ''),
+  )
+}
+
+// The final render: a straight map over core's typed parts — no marker
+// parsing in the front (that shortcut is gone; core owns it). Every CitePart's
+// n was already validated and remapped against the citations list, so a chip
+// here always resolves to citations[n-1].
+function renderParts(
+  parts: AnswerPart[],
   msgId: string,
   onCite: (n: number) => void,
 ): ReactNode[] {
-  const nodes: ReactNode[] = []
-  let cursor = 0
-  for (const match of text.matchAll(MARKER_RE)) {
-    const index = match.index ?? 0
-    if (index > cursor) nodes.push(text.slice(cursor, index))
-    const n = Number(match[1])
-    // Number("N") is NaN, so the literal "[N]" fails this check and is
-    // dropped through the same fail-fast gate as out-of-range numbers.
-    if (Number.isInteger(n) && n >= 1 && n <= numCitations) {
-      nodes.push(
-        <button
-          key={`${index}-${n}`}
-          type="button"
-          id={`cite-${msgId}-${n}`}
-          aria-label={`Ver fuente ${n}`}
-          onClick={() => onCite(n)}
-          className="mx-[2px] inline-flex"
-        >
-          <CiteChip n={n} variant="inline" />
-        </button>,
-      )
-    }
-    cursor = index + match[0].length
-  }
-  if (cursor < text.length) nodes.push(text.slice(cursor))
-  return nodes
+  return parts.map((part, index) =>
+    part.kind === 'text' ? (
+      part.text
+    ) : (
+      <button
+        key={`${index}-${part.n}`}
+        type="button"
+        id={`cite-${msgId}-${part.n}`}
+        aria-label={`Ver fuente ${part.n}`}
+        onClick={() => onCite(part.n)}
+        className="mx-[2px] inline-flex"
+      >
+        <CiteChip n={part.n} variant="inline" />
+      </button>
+    ),
+  )
 }
 
 export function Message({ message }: MessageProps) {
@@ -82,14 +108,15 @@ export function Message({ message }: MessageProps) {
   const focusSource = (n: number) =>
     setSourceFocus((prev) => ({ n, key: (prev?.key ?? 0) + 1 }))
 
+  // Two render modes by phase: while writing, the accumulated raw text with
+  // markers cosmetically hidden; on done, the typed parts (chips in place,
+  // text already stripped of the abstention tail by core). Plain cleaned text
+  // stays as the fallback for 'error' partials and a done without parts.
   const body = (
     <div className="text-[15px] leading-[1.72] text-text">
-      {renderTextWithCites(
-        message.text,
-        message.citations.length,
-        msgId,
-        focusSource,
-      )}
+      {message.phase === 'done' && message.parts
+        ? renderParts(message.parts, msgId, focusSource)
+        : hideRawMarkers(message.text)}
       {message.phase === 'writing' && (
         <span
           aria-hidden="true"

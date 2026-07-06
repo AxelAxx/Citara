@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { streamQuery } from '../api/client'
-import type { Citation } from '../api/client'
+import type { AnswerPart, Citation } from '../api/client'
 
 /**
  * Assistant lifecycle: 'thinking' from send until the first token (retrieval
@@ -13,6 +13,9 @@ export interface Message {
   role: 'user' | 'assistant'
   text: string
   citations: Citation[]
+  /** Typed view of the final text, from the done event (core's parser). null
+      until done arrives — while streaming only the raw `text` exists. */
+  parts: AnswerPart[] | null
   isAbstention: boolean
   suppressCitations: boolean
   streaming: boolean
@@ -32,6 +35,7 @@ function emptyAssistant(): Message {
     role: 'assistant',
     text: '',
     citations: [],
+    parts: null,
     isAbstention: false,
     suppressCitations: false,
     streaming: true,
@@ -69,6 +73,7 @@ export function useChat(verticalId: string): UseChatResult {
         role: 'user',
         text: query,
         citations: [],
+        parts: null,
         isAbstention: false,
         suppressCitations: false,
         streaming: false,
@@ -101,6 +106,10 @@ export function useChat(verticalId: string): UseChatResult {
             phase: 'done',
             isAbstention: event.is_abstention,
             suppressCitations: event.suppress_citations,
+            // Authoritative typed view (core's parser) — Message renders from
+            // this, not from the accumulated raw text. `?? null` keeps the
+            // fallback path alive against an older server without parts.
+            parts: event.parts ?? null,
           })),
         onError: (event) =>
           patchLast((m) => ({

@@ -62,11 +62,24 @@ export interface TokenEvent {
   text: string
 }
 
+// Typed view of the final answer text (the done event's `parts`, 3b): plain
+// text runs interleaved with resolved citation references. Discriminated on
+// `kind`, mirroring core.models.TextPart/CitePart 1:1. `n` is the 1-based
+// index into the citations event's list — the client resolves it positionally
+// (citations[n-1]) and NEVER parses [N] markers itself: core already
+// validated, dropped garbage markers, and remapped n through the dedup.
+export type AnswerPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'cite'; n: number }
+
 export interface DoneEvent {
   is_abstention: boolean
   // Mirrors is_abstention: when true the front drops the sources panel —
   // sources under "I can't find this" would contradict the answer.
   suppress_citations: boolean
+  // Authoritative parsed view of the streamed text. On abstention: a single
+  // TextPart and no CiteParts (consistent with suppress_citations).
+  parts: AnswerPart[]
 }
 
 export type ErrorEvent = ApiErrorBody
