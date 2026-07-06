@@ -272,6 +272,15 @@ class VerticalConfig(BaseModel):
     chunk_size: int = 600
     chunk_overlap: int = 90
     top_k: int = 5
+    # Max L2² distance (Chroma's metric; lower = closer) for a retrieved Chunk to
+    # count as relevant; beyond it the Chunk is noise and is dropped, so an
+    # off-domain Query reaches generation with an empty context and triggers the
+    # deterministic abstention guard instead of tempting the LLM with top-k noise
+    # (golden rule 3). Deliberately NO default: the distance distribution shifts
+    # per corpus (the measured viable ranges of the two Verticals don't even
+    # overlap), so a silent global fallback would miscalibrate or disable the
+    # gate — a missing value must fail loudly at config load (golden rule 5).
+    relevance_threshold: float = Field(gt=0.0)
     ollama_base_url: str = "http://localhost:11434"
     # Presentation data consumed by the App's empty chat state (suggested Queries,
     # in Spanish — corpus-facing data, not code). Optional on purpose: a Vertical

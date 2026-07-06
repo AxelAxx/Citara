@@ -68,8 +68,9 @@ class Retriever:
     """Given a Query, returns the top-k most relevant Chunks from the active Collection (FR6).
 
     Holds the two ports it orchestrates and nothing else: no config, no vertical
-    knowledge. ``top_k`` is a per-call argument (``engine.py`` passes
-    ``VerticalConfig.top_k``); it is never hardcoded here.
+    knowledge. ``top_k`` and ``relevance_threshold`` are per-call arguments
+    (``engine.py`` passes them from ``VerticalConfig``); neither is ever
+    hardcoded here (golden rule 2 — calibration lives in config).
     """
 
     def __init__(self, embedder: Embedder, vector_store: VectorStore) -> None:
@@ -80,6 +81,7 @@ class Retriever:
         self,
         query: Query,
         top_k: int,
+        relevance_threshold: float,
         where: dict | None = None,
     ) -> RetrievedContext:
         """Embed the Query, search the VectorStore, rebuild Chunks in relevance order.
@@ -88,6 +90,12 @@ class Retriever:
         The returned ``RetrievedContext`` preserves the store's ordering — Chroma
         returns hits nearest-first, and that order is the relevance ranking the
         Generator depends on.
+
+        ``relevance_threshold`` (from ``VerticalConfig``, like ``top_k``) is the
+        relevance gate: hits farther than it are dropped before they become Chunks.
+        Chroma always returns top-k *nearest*, never top-k *near enough* — without
+        the gate an off-domain Query arrives at generation with k noise chunks and
+        the LLM is left to soft-decline on its own (golden rule 3's failure mode).
         """
         # Same model as ingestion by construction (golden rule 4) — embed_query, so
         # query-side normalization (if the model does any) matches the port's intent.
@@ -95,8 +103,19 @@ class Retriever:
 
         hits: list[QueryHit] = self._vector_store.query(embedding, top_k, where)
 
+        # Relevance gate: drop chunks beyond the per-vertical threshold; if all
+        # fall, the empty context triggers the deterministic abstention guard
+        # downstream (no LLM soft-decline). A hit without a distance (Chroma not
+        # reporting them) cannot be shown to be relevant, so it is dropped too —
+        # assuming relevance would silently reopen the noise path the gate closes.
+        relevant = [
+            hit
+            for hit in hits
+            if hit.distance is not None and hit.distance <= relevance_threshold
+        ]
+
         # Order preserved: each QueryHit → Chunk, nearest-first as Chroma returned.
-        return [self._to_chunk(hit) for hit in hits]
+        return [self._to_chunk(hit) for hit in relevant]
 
     @staticmethod
     def _to_chunk(hit: QueryHit) -> Chunk:

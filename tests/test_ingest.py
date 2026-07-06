@@ -50,7 +50,26 @@ def _make_config(tmp_path, vertical: Vertical = Vertical.HEALTH) -> VerticalConf
         system_prompt="p",
         embedding_model="bge-m3",
         llm_model="qwen2.5:7b",
+        relevance_threshold=1.0,
     )
+
+
+def test_config_without_relevance_threshold_fails_validation(tmp_path):
+    # Deliberately NO default (golden rule 5): a YAML missing the relevance gate
+    # must fail loudly at load, never fall back to a value that silently
+    # disables or miscalibrates the gate for that Vertical.
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="relevance_threshold"):
+        VerticalConfig(
+            vertical=Vertical.HEALTH,
+            display_name="x",
+            corpus_path=str(tmp_path),
+            collection_name="c",
+            system_prompt="p",
+            embedding_model="bge-m3",
+            llm_model="qwen2.5:7b",
+        )
 
 
 # --- Chunker -----------------------------------------------------------------

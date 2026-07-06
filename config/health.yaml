@@ -18,6 +18,16 @@ domain_tagline: "GuíaSalud · Guías clínicas"
 # Query-time only — no re-ingest needed.
 top_k: 6
 
+# Relevance gate: max Chroma L2² distance (bge-m3 vectors are unit-norm, so
+# lower = closer) for a chunk to count as relevant; anything beyond is dropped,
+# and if every chunk falls the empty context triggers the deterministic
+# abstention. Calibrated empirically on this corpus: worst in-domain best-hit
+# (colloquial paraphrases included) 0.848 vs best off-domain best-hit 0.964
+# ("tortilla" lands close — clinical guides carry dietary content) — 0.90 is
+# the midpoint of that gap. Per-vertical on purpose: legal's distribution sits
+# higher and its viable range doesn't overlap this one.
+relevance_threshold: 0.90
+
 # Suggested questions for the App's empty chat state (presentation data only).
 # PROPOSED from the ingested corpus — each targets one concrete SourceDocument
 # (hipertension, diabetes-tipo-2, epoc, ictus); the hipertension one is already

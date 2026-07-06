@@ -33,8 +33,15 @@ class _FakeRetriever:
         self.calls: list[dict] = []
         self._context = context
 
-    def retrieve(self, query, top_k, where=None):
-        self.calls.append({"query": query, "top_k": top_k, "where": where})
+    def retrieve(self, query, top_k, relevance_threshold, where=None):
+        self.calls.append(
+            {
+                "query": query,
+                "top_k": top_k,
+                "relevance_threshold": relevance_threshold,
+                "where": where,
+            }
+        )
         return self._context
 
 
@@ -94,7 +101,13 @@ def _answer_with_citation() -> Answer:
     )
 
 
-def _config(vertical: Vertical, collection_name: str, system_prompt: str, top_k: int = 5) -> VerticalConfig:
+def _config(
+    vertical: Vertical,
+    collection_name: str,
+    system_prompt: str,
+    top_k: int = 5,
+    relevance_threshold: float = 1.0,
+) -> VerticalConfig:
     return VerticalConfig(
         vertical=vertical,
         display_name=f"{vertical.value} demo",
@@ -104,6 +117,7 @@ def _config(vertical: Vertical, collection_name: str, system_prompt: str, top_k:
         embedding_model="bge-m3",
         llm_model="qwen2.5:7b",
         top_k=top_k,
+        relevance_threshold=relevance_threshold,
     )
 
 
@@ -115,12 +129,15 @@ def test_answer_retrieves_with_config_top_k_and_returns_generator_answer():
     retriever = _FakeRetriever(context)
     expected = _answer_with_citation()
     generator = _FakeGenerator(expected)
-    engine = RagEngine(retriever=retriever, generator=generator, top_k=7)
+    engine = RagEngine(
+        retriever=retriever, generator=generator, top_k=7, relevance_threshold=1.23
+    )
 
     result = engine.answer(Query(text="¿plazo?"))
 
-    # top_k flows from construction (config.top_k) into retrieval.
+    # top_k and the relevance gate flow from construction (config) into retrieval.
     assert retriever.calls[0]["top_k"] == 7
+    assert retriever.calls[0]["relevance_threshold"] == 1.23
     # the context retrieved is exactly what the generator was handed.
     assert generator.calls[0]["context"] is context
     # the Generator's Answer is returned verbatim — engine adds nothing.
@@ -129,7 +146,7 @@ def test_answer_retrieves_with_config_top_k_and_returns_generator_answer():
 
 def test_where_is_forwarded_to_retrieval():
     retriever = _FakeRetriever([Chunk(text="t", metadata=ChunkMetadata(document_id="d", page=1))])
-    engine = RagEngine(retriever=retriever, generator=_FakeGenerator(_answer_with_citation()), top_k=5)
+    engine = RagEngine(retriever=retriever, generator=_FakeGenerator(_answer_with_citation()), top_k=5, relevance_threshold=1.0)
 
     where = {"document_id": "doc"}
     engine.answer("¿algo?", where=where)
@@ -143,7 +160,7 @@ def test_where_is_forwarded_to_retrieval():
 def test_str_query_is_wrapped_in_query():
     retriever = _FakeRetriever([Chunk(text="t", metadata=ChunkMetadata(document_id="d", page=1))])
     generator = _FakeGenerator(_answer_with_citation())
-    engine = RagEngine(retriever=retriever, generator=generator, top_k=5)
+    engine = RagEngine(retriever=retriever, generator=generator, top_k=5, relevance_threshold=1.0)
 
     engine.answer("texto plano")
 
@@ -163,6 +180,7 @@ def test_check_health_delegates_to_embedder_and_generator():
         retriever=_FakeRetriever([]),
         generator=generator,
         top_k=5,
+        relevance_threshold=1.0,
         embedder=embedder,
     )
 
@@ -174,7 +192,7 @@ def test_check_health_delegates_to_embedder_and_generator():
 
 def test_check_health_without_embedder_still_checks_generator():
     generator = _FakeGenerator(_answer_with_citation())
-    engine = RagEngine(retriever=_FakeRetriever([]), generator=generator, top_k=5)
+    engine = RagEngine(retriever=_FakeRetriever([]), generator=generator, top_k=5, relevance_threshold=1.0)
 
     engine.check_health()  # no embedder injected; must not raise
 
@@ -206,13 +224,13 @@ def test_from_vertical_config_wires_collection_name_per_vertical():
     assert legal._retriever._embedder.model_name == "bge-m3"
 
 
-def test_from_vertical_config_propagates_top_k():
+def test_from_vertical_config_propagates_top_k_and_relevance_threshold():
     engine = RagEngine.from_vertical_config(
-        _config(Vertical.LEGAL, "legal_chunks", "prompt", top_k=3)
+        _config(Vertical.LEGAL, "legal_chunks", "prompt", top_k=3, relevance_threshold=1.05)
     )
-    retriever = _FakeRetriever([Chunk(text="t", metadata=ChunkMetadata(document_id="d", page=1))])
-    # Rebuild a tiny engine sharing the same top_k to confirm it was captured.
+    # Both retrieval knobs are captured from the ONE config (golden rule 2).
     assert engine._top_k == 3
+    assert engine._relevance_threshold == 1.05
 
 
 # --- FR7/FR11: answer_stream orchestrates streaming (text + citations) --------
@@ -227,7 +245,9 @@ def test_answer_stream_returns_text_stream_and_citations():
         fragments=["El plazo ", "es de ", "un mes."],
         citations=citations,
     )
-    engine = RagEngine(retriever=retriever, generator=generator, top_k=6)
+    engine = RagEngine(
+        retriever=retriever, generator=generator, top_k=6, relevance_threshold=1.0
+    )
 
     streamed = engine.answer_stream(Query(text="¿plazo?"))
 
@@ -250,7 +270,7 @@ def test_answer_stream_wraps_str_query():
         fragments=["hola"],
         citations=[Citation(document_id="d", page=1)],
     )
-    engine = RagEngine(retriever=retriever, generator=generator, top_k=5)
+    engine = RagEngine(retriever=retriever, generator=generator, top_k=5, relevance_threshold=1.0)
 
     streamed = engine.answer_stream("texto plano")
     list(streamed.text_stream)  # generate_stream is lazy; consume it to record the call
@@ -269,7 +289,7 @@ def test_answer_stream_empty_context_abstains_with_no_citations():
         fragments=["no debería usarse"],
         citations=[Citation(document_id="x", page=1)],
     )
-    engine = RagEngine(retriever=retriever, generator=generator, top_k=5)
+    engine = RagEngine(retriever=retriever, generator=generator, top_k=5, relevance_threshold=1.0)
 
     streamed = engine.answer_stream("¿algo?")
 
@@ -290,7 +310,10 @@ def test_answer_stream_part_stream_emits_citepart_when_marker_closes():
         citations=[citation],
     )
     engine = RagEngine(
-        retriever=_FakeRetriever(context), generator=generator, top_k=5
+        retriever=_FakeRetriever(context),
+        generator=generator,
+        top_k=5,
+        relevance_threshold=1.0,
     )
 
     parts = list(engine.answer_stream("¿plazo?").part_stream)
@@ -310,6 +333,7 @@ def test_corpus_stats_requires_wired_store_and_embedder():
         retriever=_FakeRetriever([]),
         generator=_FakeGenerator(_answer_with_citation()),
         top_k=5,
+        relevance_threshold=1.0,
         # plain test constructor: no VectorStore, no Embedder
     )
 
@@ -341,6 +365,7 @@ def test_corpus_stats_delegates_with_the_configured_embedding_model():
         retriever=_FakeRetriever([]),
         generator=_FakeGenerator(_answer_with_citation()),
         top_k=5,
+        relevance_threshold=1.0,
         embedder=_NamedEmbedder(),
         vector_store=store,
     )

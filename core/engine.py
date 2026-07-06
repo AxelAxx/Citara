@@ -105,6 +105,7 @@ class RagEngine:
         retriever: Retriever,
         generator: Generator,
         top_k: int,
+        relevance_threshold: float,
         *,
         embedder: OllamaEmbedder | None = None,
         vector_store: VectorStore | None = None,
@@ -112,6 +113,9 @@ class RagEngine:
         self._retriever = retriever
         self._generator = generator
         self._top_k = top_k
+        # Per-vertical relevance gate (VerticalConfig.relevance_threshold), fed to
+        # every retrieval exactly like top_k — the engine holds it, never invents it.
+        self._relevance_threshold = relevance_threshold
         # Held only so check_health() can delegate to the Embedder preflight as well
         # as the Generator's; not used on the query path.
         self._embedder = embedder
@@ -146,6 +150,7 @@ class RagEngine:
             retriever=retriever,
             generator=generator,
             top_k=config.top_k,
+            relevance_threshold=config.relevance_threshold,
             embedder=embedder,
             vector_store=vector_store,
         )
@@ -176,7 +181,12 @@ class RagEngine:
         if isinstance(query, str):
             query = Query(text=query)
 
-        context = self._retriever.retrieve(query, top_k=self._top_k, where=where)
+        context = self._retriever.retrieve(
+            query,
+            top_k=self._top_k,
+            relevance_threshold=self._relevance_threshold,
+            where=where,
+        )
         return self._generator.generate(query, context)
 
     def answer_stream(
@@ -201,7 +211,12 @@ class RagEngine:
         if isinstance(query, str):
             query = Query(text=query)
 
-        context = self._retriever.retrieve(query, top_k=self._top_k, where=where)
+        context = self._retriever.retrieve(
+            query,
+            top_k=self._top_k,
+            relevance_threshold=self._relevance_threshold,
+            where=where,
+        )
         # Citations are fixed the instant retrieval returns; only content streams.
         part_stream = self._generator.generate_stream_parts(query, context)
         citations = self._generator.citations_for_context(context)
