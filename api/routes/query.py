@@ -8,8 +8,8 @@ from collections.abc import Iterator
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 
-from core.generate import ABSTENTION_TEXT
-from core.models import RagEngineError
+from core.generate import ABSTENTION_TEXT, parse_citations
+from core.models import RagEngineError, TextPart
 
 from api.dependencies import get_engine
 from api.errors import http_error_for
@@ -76,10 +76,30 @@ def query(vertical_id: str, body: QueryRequest) -> EventSourceResponse:
         is_abstention = not streamed.citations or full_text.strip().startswith(
             ABSTENTION_TEXT
         )
+        if is_abstention:
+            # One plain part, no cites: a chip under a suppressed sources panel
+            # would point at nothing renderable (consistent with
+            # suppress_citations below).
+            parts = [TextPart(text=full_text)]
+        else:
+            # The typed view of the final text, REUSING core's parser — no
+            # marker logic in api. The accumulated text came from core's
+            # part_stream plain view, so its [n] markers are already validated
+            # and remapped to citation indexes (invalid ones never reached the
+            # wire); parsing against the citations count reproduces the same
+            # parts core would attach to a non-streamed Answer.
+            parts = parse_citations(
+                full_text, num_citations=len(streamed.citations)
+            )
         yield {
             "event": "done",
             "data": json.dumps(
-                {"is_abstention": is_abstention, "suppress_citations": is_abstention}
+                {
+                    "is_abstention": is_abstention,
+                    "suppress_citations": is_abstention,
+                    "parts": [part.model_dump() for part in parts],
+                },
+                ensure_ascii=False,
             ),
         }
 

@@ -79,7 +79,8 @@ cheap path: VectorStore only, no LLM warm-up).
 
 ### `POST /api/verticals/{id}/query`  → **SSE stream**
 The core use case. Wraps `RagEngine.answer_stream(query)`, which returns a
-`StreamedAnswer(text_stream: Iterator[str], citations: list[Citation])`.
+`StreamedAnswer(part_stream: Iterator[AnswerPart], citations: list[Citation])` —
+`text_stream` is its derived plain-text view, which is what the token events consume.
 
 **Request body**
 ```json
@@ -99,22 +100,46 @@ retrieval returns) and streams text after — so the SSE event order mirrors tha
    - `is_abstention` here reflects ONLY the hard path (`citations == []`). It is an early
      hint, NOT the final decision — the authoritative resolution arrives in `done` (soft
      abstention is only detectable after the full text is known).
-2. `event: token` — repeated, one per text fragment from `text_stream`.
+2. `event: token` — repeated, one per text fragment from `text_stream`. UNCHANGED by the
+   inline-citation feature: plain text for the typewriter effect. The text may carry raw
+   `[N]` markers (already validated + remapped by core); the client does NOT parse or
+   paint them — chips wait for `done`.
    ```
    event: token
    data: {"text": "Según"}
    ```
-3. `event: done` — once, authoritative resolution (was `{}`).
+3. `event: done` — once, authoritative resolution + the typed `parts` view of the final text.
    ```
    event: done
-   data: {"is_abstention": true, "suppress_citations": true}
+   data: {"is_abstention": false, "suppress_citations": false, "parts": [
+     {"kind": "text", "text": "Según el artículo 38 del Estatuto "},
+     {"kind": "cite", "n": 1},
+     {"kind": "text", "text": ", el periodo será..."}
+   ]}
    ```
+   - `parts` (NEW) is the parsed view of the streamed text: `TextPart` runs interleaved
+     with `CitePart{n}` markers, produced by `core.generate.parse_citations`. `n` is the
+     **1-based index into the `citations` event's list** (core already remapped fragment
+     numbers through the dedup) — the client resolves `n → citations[n-1]` positionally
+     and NEVER parses `[N]` markers itself (that shortcut lived in the front temporarily;
+     the contract now provides the parsed view).
+   - Client flow (enfoque B): render `token` text incrementally while streaming; on `done`,
+     replace the raw text with the render of `parts` (CiteChips in place).
+   - On abstention, `parts` is a single `TextPart` with the abstention text and NO
+     `CitePart`s — consistent with `suppress_citations` (a cite chip under a suppressed
+     sources panel would point at nothing renderable).
    The server accumulates the full text during the stream and resolves abstention at close
    with the SAME criterion the Streamlit `layout` used
    (`not citations or full_text.strip().startswith(ABSTENTION_TEXT)`). The client renders
    tokens as they arrive, then on `done`: if `is_abstention` → show the abstention pill and
    DISCARD the sources panel (even if the `citations` event carried noise citations);
    otherwise render the sources normally. `suppress_citations == is_abstention`.
+
+   **AnswerPart types** (mirror of `core.models`, discriminated on `kind`):
+   - `TextPart` — `{"kind": "text", "text": str}`: a run of plain answer text.
+   - `CitePart` — `{"kind": "cite", "n": int}`: an inline citation marker; `n` indexes the
+     `citations` list 1-based. Invalid/out-of-range markers (and the echoed `[N]` template
+     literal) were already dropped by core and never reach the wire.
 4. `event: error` — if generation fails mid-stream (Ollama drops). Carries the actionable
    message; the front clears the loading state and shows the error card.
    ```
