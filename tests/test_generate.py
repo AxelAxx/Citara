@@ -18,6 +18,7 @@ from core.generate import (
     Generator,
     iter_answer_parts,
     parse_citations,
+    strip_trailing_abstention,
 )
 from core.models import (
     Answer,
@@ -325,6 +326,95 @@ def test_parse_citations_template_literal_is_dropped():
         CitePart(n=1),
         TextPart(text="."),
     ]
+
+
+# --- trailing-abstention strip (golden rule 3: cited OR abstention, never both) ---
+
+
+def test_strip_trailing_abstention_removes_exact_suffix_and_surrounding_whitespace():
+    text = f"El plazo es de un mes [1].\n\n  {ABSTENTION_TEXT}  \n"
+
+    assert strip_trailing_abstention(text) == "El plazo es de un mes [1]."
+
+
+def test_strip_trailing_abstention_returns_text_without_suffix_untouched():
+    text = "El plazo es de un mes [1]."
+
+    assert strip_trailing_abstention(text) == text
+
+
+def test_cited_text_with_trailing_abstention_loses_it_in_parts():
+    # The 7B's mixed failure mode: a correct cited answer + the abstention
+    # sentence appended. The parts view must not carry the spurious TextPart.
+    text = f"El plazo es de un mes [1].\n\n{ABSTENTION_TEXT}"
+
+    parts = parse_citations(text, num_citations=2)
+
+    assert parts == [
+        TextPart(text="El plazo es de un mes "),
+        CitePart(n=1),
+        TextPart(text="."),
+    ]
+
+
+def test_pure_abstention_is_never_stripped():
+    # 0 CiteParts ⇒ the phrase IS the answer (e.g. the empty-context guard):
+    # stripping here would return an empty Answer — the critical non-case.
+    parts = parse_citations(ABSTENTION_TEXT, num_citations=0)
+
+    assert parts == [TextPart(text=ABSTENTION_TEXT)]
+
+
+def test_cited_text_without_trailing_abstention_is_untouched():
+    parts = parse_citations("El plazo es de un mes [1].", num_citations=1)
+
+    assert parts == [
+        TextPart(text="El plazo es de un mes "),
+        CitePart(n=1),
+        TextPart(text="."),
+    ]
+
+
+def test_mid_text_abstention_is_not_stripped():
+    # Only a TRAILING occurrence goes; the phrase inside the prose stays.
+    text = f"{ABSTENTION_TEXT} Sin embargo, el artículo 5 dice otra cosa [1]."
+
+    parts = parse_citations(text, num_citations=1)
+
+    assert parts == [
+        TextPart(text=f"{ABSTENTION_TEXT} Sin embargo, el artículo 5 dice otra cosa "),
+        CitePart(n=1),
+        TextPart(text="."),
+    ]
+
+
+def test_paraphrased_trailing_abstention_is_not_stripped():
+    # Byte-exactness: only the literal is removed, never a lookalike — a
+    # paraphrase is LLM prose, and guessing at it would censor real text.
+    text = "El plazo es de un mes [1]. No encuentro esto en los documentos."
+
+    parts = parse_citations(text, num_citations=1)
+
+    assert parts[-1] == TextPart(text=". No encuentro esto en los documentos.")
+
+
+def test_generate_strips_trailing_abstention_from_text_and_parts(monkeypatch):
+    # End-to-end through generate(): Answer.text and Answer.parts are one view —
+    # both lose the appended sentence, neither loses the citation.
+    _install_chat(
+        monkeypatch, reply=f"El plazo es de un mes [1].\n\n{ABSTENTION_TEXT}"
+    )
+    generator = _make_generator()
+
+    answer = generator.generate(Query(text="¿plazo?"), [_chunk("doc", 1)])
+
+    assert answer.text == "El plazo es de un mes [1]."
+    assert CitePart(n=1) in answer.parts
+    assert all(
+        ABSTENTION_TEXT not in part.text
+        for part in answer.parts
+        if isinstance(part, TextPart)
+    )
 
 
 def test_iter_answer_parts_template_literal_split_across_fragments():

@@ -90,6 +90,30 @@ _MARKER_PREFIX_RE = re.compile(r"\[(?:\d{0,6}|N)")
 # --- inline citation markers → AnswerParts (FR9 / 3b) --------------------------
 
 
+def strip_trailing_abstention(text: str) -> str:
+    """Remove one trailing byte-exact ``ABSTENTION_TEXT`` occurrence — and the
+    whitespace/newlines immediately around it — or return ``text`` untouched.
+
+    Why this exists: the 7B intermittently appends the abstention sentence
+    after a fully cited answer, and the prompt cannot suppress it — 10 wording
+    variants were tested and every one that killed the trailing phrase also
+    broke the [N] markers on other queries. A cited answer that ends in "I
+    can't find this" contradicts itself (golden rule 3: grounded+cited OR
+    abstention, never both), so the contradiction is removed deterministically
+    here instead of hoped away in the prompt.
+
+    Deliberately narrow: only a TRAILING, byte-exact occurrence of the literal
+    is removed — never a mid-text occurrence, never a paraphrase. Callers must
+    apply it only to answers that actually cite (see ``_resolve_final_text``),
+    so a pure abstention — where the phrase IS the whole answer — is never
+    emptied.
+    """
+    trimmed = text.rstrip()
+    if not trimmed.endswith(ABSTENTION_TEXT):
+        return text
+    return trimmed[: -len(ABSTENTION_TEXT)].rstrip()
+
+
 def parse_citations(text: str, num_citations: int) -> list[AnswerPart]:
     """Split LLM text with inline ``[N]`` markers into typed AnswerParts.
 
@@ -113,8 +137,39 @@ def parse_citations(text: str, num_citations: int) -> list[AnswerPart]:
     One algorithm with the streaming path: this is :func:`iter_answer_parts`
     over a single fragment, plus merging of adjacent TextParts (a dropped
     marker leaves its two text neighbours split in the incremental view).
+
+    Also the entry point for the trailing-abstention strip: cited answers
+    (>= 1 CitePart) lose a trailing ``ABSTENTION_TEXT`` here, via
+    ``_resolve_final_text`` — see :func:`strip_trailing_abstention` for why.
     """
-    return _merge_adjacent_text(list(iter_answer_parts([text], num_citations)))
+    _, parts = _resolve_final_text(text, num_citations)
+    return parts
+
+
+def _resolve_final_text(text: str, num_citations: int) -> tuple[str, list[AnswerPart]]:
+    """THE single final-text resolution site (DRY): parse markers into parts
+    and, iff the answer actually cites, drop a trailing abstention sentence.
+
+    Both authoritative consumers flow through here — ``Generator.generate``
+    directly (so ``Answer.text`` and ``Answer.parts`` stay one coherent view)
+    and the API's SSE ``done`` event via :func:`parse_citations`. Cited-ness is
+    decided on the PARSED parts, not on a raw regex: dropped/out-of-range
+    markers don't count as citing, so a pure abstention (0 CiteParts — the
+    phrase IS the answer) is returned untouched, never emptied.
+    """
+    parts = _merge_adjacent_text(list(iter_answer_parts([text], num_citations)))
+    if not any(isinstance(part, CitePart) for part in parts):
+        return text, parts
+
+    stripped = strip_trailing_abstention(text)
+    if stripped == text:
+        return text, parts
+    # Re-parse the stripped text so the removed sentence can't leave a spurious
+    # trailing TextPart behind. The stripped suffix is the bare literal (no
+    # markers), so every CitePart survives the second pass identically.
+    return stripped, _merge_adjacent_text(
+        list(iter_answer_parts([stripped], num_citations))
+    )
 
 
 def iter_answer_parts(
@@ -254,20 +309,19 @@ class Generator:
         # honest set of sources consulted. The Answer invariant then forbids a
         # non-abstaining Answer with no citations, so grounding can't silently slip.
         citations = self._citations_from_context(context)
-        # parts: the same text split for inline chips. ``text`` stays the raw
-        # reply (markers included) so plain consumers lose nothing. Markers are
-        # parsed against the FRAGMENT count and then remapped to citation
-        # indexes — validating against len(citations) directly would misindex
-        # (or wrongly drop) markers whenever two chunks shared (doc, page).
+        # parts: the same text split for inline chips. Markers are parsed
+        # against the FRAGMENT count and then remapped to citation indexes —
+        # validating against len(citations) directly would misindex (or wrongly
+        # drop) markers whenever two chunks shared (doc, page). Text and parts
+        # come from the ONE resolution site so a stripped trailing abstention
+        # (see strip_trailing_abstention) disappears from both views at once:
+        # ``text`` keeps the raw markers, but never the cited+abstention
+        # contradiction (golden rule 3).
         fragment_to_citation = self._fragment_index_to_citation_index(
             context, citations
         )
-        parts = list(
-            _remap_cite_indexes(
-                parse_citations(text, num_citations=len(context)),
-                fragment_to_citation,
-            )
-        )
+        text, raw_parts = _resolve_final_text(text, num_citations=len(context))
+        parts = list(_remap_cite_indexes(raw_parts, fragment_to_citation))
         return Answer(text=text, citations=citations, parts=parts)
 
     def generate_stream(self, query: Query, context: RetrievedContext) -> Iterator[str]:
@@ -308,6 +362,12 @@ class Generator:
         needs no special-casing: an empty context streams the abstention
         sentence (no markers) as plain text, and the zero fragment count makes
         any stray marker unresolvable anyway.
+
+        The trailing-abstention strip does NOT happen here: emitted parts are
+        already on the wire when the tail arrives, so the live stream may still
+        end with the sentence. The authoritative views strip it — the API's
+        ``done`` event re-resolves the full text through ``parse_citations``,
+        and the non-streaming ``generate`` resolves the same way.
         """
         citations = self._citations_from_context(context)
         fragment_to_citation = self._fragment_index_to_citation_index(
