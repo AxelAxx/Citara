@@ -140,11 +140,16 @@ retrieval returns) and streams text after — so the SSE event order mirrors tha
      under a suppressed sources panel would point at nothing renderable). The anchor pass
      is skipped entirely on abstention.
    The server accumulates the full text during the stream and resolves abstention at close
-   with the SAME criterion the Streamlit `layout` used
-   (`not citations or full_text.strip().startswith(ABSTENTION_TEXT)`). The client renders
-   tokens as they arrive, then on `done`: if `is_abstention` → show the abstention pill and
-   DISCARD the sources panel (even if the `citations` event carried noise citations);
-   otherwise render the sources normally. `suppress_citations == is_abstention`.
+   from the RESOLVED state, never from raw prose: with `citations == []` (hard path) it is
+   an abstention outright and `resolve_parts` is skipped; with citations, resolution always
+   runs and `is_abstention = (zero CiteParts in parts) AND (resolved text == ABSTENTION_TEXT,
+   byte-exact post-strip)`. Zero CiteParts alone is not enough — mode `off` and a degraded
+   anchor pass produce chip-less GROUNDED answers. A reply that merely LEADS with the
+   abstention sentence and then carries cited content is cleaned by core's symmetric
+   `strip_abstention_phrase` and stays an answered response. The client renders tokens as
+   they arrive, then on `done`: if `is_abstention` → show the abstention pill and DISCARD
+   the sources panel (even if the `citations` event carried noise citations); otherwise
+   render the sources normally. `suppress_citations == is_abstention`.
 
    **AnswerPart types** (mirror of `core.models`, discriminated on `kind`):
    - `TextPart` — `{"kind": "text", "text": str}`: a run of plain answer text.
@@ -171,7 +176,10 @@ for the MVP the client just drops the connection.)
 - **Soft abstention:** vector search ALWAYS returns top-k neighbours, so with a populated
   corpus retrieval is practically never empty — the hard guard rarely fires. Instead the
   LLM declines in prose with `ABSTENTION_TEXT` while carrying noise citations. This is the
-  common case and is ONLY detectable after the full text is known.
+  common case and is ONLY detectable after the full text is RESOLVED: a PURE decline (the
+  resolved text IS the sentence, zero CiteParts) is an abstention; a decline sentence at an
+  EDGE of real cited content is a model self-contradiction that core strips, not an
+  abstention.
 
 The resolution lives server-side in the `api/` SSE adapter (mirroring where it lived in the
 Streamlit `layout` — Presentation, not Domain). `core/` is untouched; `api/` reuses
