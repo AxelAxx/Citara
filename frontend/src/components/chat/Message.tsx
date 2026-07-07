@@ -156,7 +156,12 @@ export function Message({ message, abstentionText }: MessageProps) {
         {thinking ? (
           <ThinkingIndicator />
         ) : message.phase === 'done' && message.isAbstention ? (
-          <AbstentionNote>{body}</AbstentionNote>
+          // hadCandidates: the citations event always lands before done (even
+          // on abstentions; suppress only hides the panel), so its length
+          // distinguishes hard (empty retrieval) from soft (model declined).
+          <AbstentionNote hadCandidates={message.citations.length > 0}>
+            {body}
+          </AbstentionNote>
         ) : (
           <>
             {/* On 'error' any partial text stays visible above the card. */}
