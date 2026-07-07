@@ -10,7 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from core.engine import StreamedAnswer
 from core.generate import ABSTENTION_TEXT
-from core.models import RagEngineError, TextPart
+from core.models import CitePart, RagEngineError, TextPart
 
 from api.dependencies import get_engine
 from api.errors import http_error_for
@@ -74,28 +74,37 @@ def _stream_events(streamed: StreamedAnswer) -> Iterator[dict]:
             ),
         }
         return
-    # Authoritative abstention resolution: hard path (no citations) OR soft
-    # path (the LLM declined in prose). suppress_citations tells the front to
-    # drop the sources panel: sources under "I can't find this" would
-    # contradict the answer.
-    is_abstention = not streamed.citations or full_text.strip().startswith(
-        ABSTENTION_TEXT
-    )
-    if is_abstention:
+    if not streamed.citations:
+        # Hard path (unchanged): empty retrieval is an abstention by STATE.
         # One plain part, no cites — the abstention shape the contract
         # documents. No resolve_parts call: there is nothing to anchor, and
         # in "structured" mode that would be a wasted second LLM call.
+        is_abstention = True
         parts = [TextPart(text=full_text)]
     else:
-        # The anchored, core-validated parts (Generator.parts_for_text via the
-        # StreamedAnswer seam — the api never parses or anchors anything, and
-        # never decides the vertical's inline_citation_mode: core does).
-        # LATENCY, stated loudly: in "structured" mode this is the second LLM
-        # call over the full text. The token stream above has already finished
-        # — the user is reading the complete answer — and the chips arrive
-        # with this done event a few seconds later. Accepted trade-off of the
-        # structured mode; "off" resolves instantly with a single TextPart.
-        _, parts = streamed.resolve_parts(full_text)
+        # Retrieval hit: resolution ALWAYS runs — including for a pure
+        # soft-decline, where it returns instantly (core's pure-abstention
+        # guard short-circuits before the anchor pass), so no LLM call is
+        # wasted. The anchored, core-validated parts come from
+        # Generator.parts_for_text via the StreamedAnswer seam — the api
+        # never parses or anchors anything, and never decides the vertical's
+        # inline_citation_mode: core does. LATENCY, stated loudly: in
+        # "structured" mode this is the second LLM call over the full text,
+        # and the chips arrive with this done event a few seconds after the
+        # last token. Accepted trade-off; "off" resolves instantly.
+        final_text, parts = streamed.resolve_parts(full_text)
+        # Abstention authority is the RESOLVED state, never raw prose and
+        # never raw retrieval citations. A leading "No encuentro esto..."
+        # followed by real cited content resolves to CiteParts => answered
+        # (the old startswith marked it an abstention WITH citations behind
+        # it). A pure soft-decline has citations (retrieval hit) but zero
+        # CiteParts => abstention. Zero CiteParts ALONE is not enough — mode
+        # "off" and a degraded anchor pass also produce chip-less GROUNDED
+        # answers — so the resolved text must also BE core's abstention
+        # sentence (byte-exact equality post-strip, the same pure-abstention
+        # rule core applies in _resolve_parts).
+        has_cite = any(isinstance(part, CitePart) for part in parts)
+        is_abstention = not has_cite and final_text.strip() == ABSTENTION_TEXT
     yield {
         "event": "done",
         "data": json.dumps(

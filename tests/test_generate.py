@@ -18,7 +18,7 @@ from core.generate import (
     Generator,
     _parse_anchor_json,
     split_into_sentences,
-    strip_trailing_abstention,
+    strip_abstention_phrase,
 )
 from core.models import (
     Answer,
@@ -347,34 +347,61 @@ def test_generate_raises_on_missing_message_content(monkeypatch):
         _make_generator().generate(Query(text="x"), context=[_chunk("doc", 1)])
 
 
-# --- trailing-abstention strip (golden rule 3: answered OR abstention, never both) ---
+# --- abstention-phrase strip (golden rule 3: answered OR abstention, never both) ---
 
 
-def test_strip_trailing_abstention_removes_exact_suffix_and_surrounding_whitespace():
+def test_strip_abstention_phrase_removes_exact_suffix_and_surrounding_whitespace():
     text = f"El plazo es de un mes.\n\n  {ABSTENTION_TEXT}  \n"
 
-    assert strip_trailing_abstention(text) == "El plazo es de un mes."
+    assert strip_abstention_phrase(text) == "El plazo es de un mes."
 
 
-def test_strip_trailing_abstention_returns_text_without_suffix_untouched():
+def test_strip_abstention_phrase_returns_text_without_occurrence_untouched():
     text = "El plazo es de un mes."
 
-    assert strip_trailing_abstention(text) == text
+    assert strip_abstention_phrase(text) == text
 
 
-def test_strip_trailing_abstention_ignores_mid_text_occurrence():
-    # Only a TRAILING occurrence goes; the phrase inside the prose stays.
+def test_strip_abstention_phrase_removes_leading_occurrence():
+    # CONTRACT CHANGE (bug B): this exact text used to be pinned as untouched
+    # — that pin was the SYMPTOM (a leading phrase next to real content is the
+    # same self-contradiction as the trailing one), not desired behaviour.
+    # With abstention authority on retrieval state, the leading edge strips
+    # symmetrically and the real content survives intact.
     text = f"{ABSTENTION_TEXT} Sin embargo, el artículo 5 dice otra cosa."
 
-    assert strip_trailing_abstention(text) == text
+    assert (
+        strip_abstention_phrase(text)
+        == "Sin embargo, el artículo 5 dice otra cosa."
+    )
 
 
-def test_strip_trailing_abstention_ignores_paraphrase():
+def test_strip_abstention_phrase_removes_both_edges_at_once():
+    text = f"{ABSTENTION_TEXT}\nEl plazo es de un mes.\n{ABSTENTION_TEXT}"
+
+    assert strip_abstention_phrase(text) == "El plazo es de un mes."
+
+
+def test_strip_abstention_phrase_ignores_mid_text_occurrence():
+    # EDGES only: a genuinely mid-text occurrence stays — removing prose from
+    # the middle of an answer would corrupt it.
+    text = f"El juez dijo: {ABSTENTION_TEXT} Y luego resolvió otra cosa."
+
+    assert strip_abstention_phrase(text) == text
+
+
+def test_strip_abstention_phrase_returns_empty_for_pure_abstention():
+    # The caller's guard contract (_resolve_parts): the phrase being the WHOLE
+    # answer returns "", and the caller keeps the original — never emptied.
+    assert strip_abstention_phrase(ABSTENTION_TEXT) == ""
+
+
+def test_strip_abstention_phrase_ignores_paraphrase():
     # Byte-exactness: only the literal is removed, never a lookalike — a
     # paraphrase is LLM prose, and guessing at it would censor real text.
     text = "El plazo es de un mes. No encuentro esto en los documentos."
 
-    assert strip_trailing_abstention(text) == text
+    assert strip_abstention_phrase(text) == text
 
 
 def test_generate_strips_trailing_abstention_from_text_and_parts(monkeypatch):

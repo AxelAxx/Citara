@@ -69,6 +69,58 @@ def test_done_serves_plain_textpart_when_core_mode_is_off():
     assert done["is_abstention"] is False
 
 
+def test_leading_abstention_with_citations_is_not_abstention():
+    # Bug B repro: the 7B LEADS with the abstention phrase and then delivers
+    # real cited content. The old startswith authority marked this done as an
+    # abstention WITH citations behind it — suppressing the panel and skipping
+    # resolve_parts. State authority (citations exist) sends it through
+    # resolve_parts like any answer; core's symmetric strip cleans the phrase.
+    full = f"{ABSTENTION_TEXT} Sin embargo, el artículo 5 dice otra cosa."
+    resolved_calls: list[str] = []
+
+    def resolve(full_text: str):
+        resolved_calls.append(full_text)
+        # What core's _resolve_parts produces for this reply: leading phrase
+        # stripped, content anchored.
+        return "Sin embargo, el artículo 5 dice otra cosa.", [
+            TextPart(text="Sin embargo, el artículo 5 dice otra cosa."),
+            CitePart(n=1),
+        ]
+
+    streamed = StreamedAnswer(
+        part_stream=iter([TextPart(text=full)]),
+        citations=[_citation()],
+        resolve_parts=resolve,
+    )
+
+    done = _collect(_stream_events(streamed))[-1][1]
+
+    assert resolved_calls == [full]  # resolve_parts DID run (no short-circuit)
+    assert done["is_abstention"] is False
+    assert done["suppress_citations"] is False
+    assert {"kind": "cite", "n": 1} in done["parts"]  # chips, not a raw TextPart
+
+
+def test_pure_soft_decline_with_citations_is_abstention():
+    # The symmetric contradiction the state-authority fix must NOT introduce:
+    # retrieval hit (citations non-empty) but the 7B declined in prose — the
+    # resolved parts carry ZERO CiteParts and the resolved text IS the
+    # abstention sentence. Showing a sources panel next to "No encuentro
+    # esto..." would be rule 3 inverted, so this IS an abstention: authority
+    # is the RESOLVED state (parts + final text), not raw citations.
+    streamed = StreamedAnswer(
+        part_stream=iter([TextPart(text=ABSTENTION_TEXT)]),
+        citations=[_citation()],  # retrieval found chunks; the model declined
+        resolve_parts=lambda text: (text, [TextPart(text=text)]),
+    )
+
+    done = _collect(_stream_events(streamed))[-1][1]
+
+    assert done["is_abstention"] is True
+    assert done["suppress_citations"] is True
+    assert done["parts"] == [{"kind": "text", "text": ABSTENTION_TEXT}]
+
+
 def test_hard_abstention_done_is_single_textpart_without_resolve_call():
     def boom(full_text: str):
         raise AssertionError(

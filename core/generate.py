@@ -351,28 +351,40 @@ def _parts_from_anchors(
 # --- shared text helpers -------------------------------------------------------
 
 
-def strip_trailing_abstention(text: str) -> str:
-    """Remove one trailing byte-exact ``ABSTENTION_TEXT`` occurrence — and the
-    whitespace/newlines immediately around it — or return ``text`` untouched.
+def strip_abstention_phrase(text: str) -> str:
+    """Remove one LEADING and/or one TRAILING byte-exact ``ABSTENTION_TEXT``
+    occurrence — and the whitespace/newlines immediately around each — or
+    return ``text`` untouched.
 
     Why this exists: the 7B intermittently appends the abstention sentence
     after a real answer, and the prompt cannot suppress it (10 wording
     variants were tested; every one traded the trailing phrase for other
-    regressions). An answer that ends in "I can't find this" contradicts
-    itself (golden rule 3: grounded+cited OR abstention, never both), so the
-    contradiction is removed deterministically here instead of hoped away in
-    the prompt.
+    regressions). An answer carrying "I can't find this" next to real content
+    contradicts itself (golden rule 3: grounded+cited OR abstention, never
+    both), so the contradiction is removed deterministically here instead of
+    hoped away in the prompt.
 
-    Deliberately narrow: only a TRAILING, byte-exact occurrence of the literal
-    is removed — never a mid-text occurrence, never a paraphrase. Callers must
-    guard the pure-abstention case (see ``Generator._resolve_parts``): when
-    the phrase IS the whole answer this returns "", and the caller keeps the
-    original instead.
+    Why symmetric (leading too): with abstention authority now on retrieval
+    STATE (the API flags abstention only when retrieval returned nothing —
+    never on prose), a reply that LEADS with the phrase and then carries real
+    cited content flows through resolution like any answer; the leading
+    contradiction must be cleaned in this same single site, exactly like the
+    trailing case always was.
+
+    Deliberately narrow, as before: byte-exact occurrences at the EDGES only —
+    never a mid-text occurrence, never a paraphrase. Callers must guard the
+    pure-abstention case (see ``Generator._resolve_parts``): when the phrase
+    IS the whole answer this returns "", and the caller keeps the original
+    instead.
     """
-    trimmed = text.rstrip()
-    if not trimmed.endswith(ABSTENTION_TEXT):
-        return text
-    return trimmed[: -len(ABSTENTION_TEXT)].rstrip()
+    result = text
+    lstripped = result.lstrip()
+    if lstripped.startswith(ABSTENTION_TEXT):
+        result = lstripped[len(ABSTENTION_TEXT) :].lstrip()
+    rstripped = result.rstrip()
+    if rstripped.endswith(ABSTENTION_TEXT):
+        result = rstripped[: -len(ABSTENTION_TEXT)].rstrip()
+    return result
 
 
 def _merge_adjacent_text(parts: list[AnswerPart]) -> list[AnswerPart]:
@@ -455,7 +467,7 @@ class Generator:
         # anchors (remapped through the dedup table so CitePart.n indexes
         # Answer.citations); in "off" mode the answer is one TextPart. Both
         # views come from the ONE resolution site (_resolve_parts), so a
-        # stripped trailing abstention disappears from text and parts at once.
+        # stripped edge abstention disappears from text and parts at once.
         fragment_to_citation = self._fragment_index_to_citation_index(
             context, citations
         )
@@ -501,9 +513,9 @@ class Generator:
         anchoring needs the whole answer. In "structured" mode that second
         call adds latency between the last streamed token and the parts.
 
-        Neither does the trailing-abstention strip happen here: emitted parts
-        are already on the wire when the tail arrives. The authoritative views
-        strip it (:meth:`parts_for_text` / :meth:`generate`).
+        Neither does the abstention-phrase strip happen here: emitted parts
+        are already on the wire when an edge occurrence arrives. The
+        authoritative views strip it (:meth:`parts_for_text` / :meth:`generate`).
         """
         for fragment in self.generate_stream(query, context):
             yield TextPart(text=fragment)
@@ -547,14 +559,15 @@ class Generator:
     ) -> tuple[str, list[AnswerPart]]:
         """THE single final-resolution site for clean-prose replies.
 
-        Order matters: the trailing-abstention strip runs FIRST, so a mixed
-        reply never reaches segmentation with the contradiction attached. With
-        markers gone, cited-ness can no longer gate that strip (the old rule);
-        the successor rule is: strip a trailing occurrence unless the phrase
-        IS the whole reply — a pure soft abstention stays intact, never
-        emptied (rule 3).
+        Order matters: the abstention-phrase strip (leading AND trailing —
+        symmetric since abstention authority moved to retrieval state) runs
+        FIRST, so a mixed reply never reaches segmentation with the
+        contradiction attached. With markers gone, cited-ness can no longer
+        gate that strip (the old rule); the successor rule is: strip an edge
+        occurrence unless the phrase IS the whole reply — a pure soft
+        abstention stays intact, never emptied (rule 3).
         """
-        stripped = strip_trailing_abstention(text)
+        stripped = strip_abstention_phrase(text)
         if stripped.strip():
             text = stripped
 
