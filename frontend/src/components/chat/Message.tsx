@@ -166,6 +166,7 @@ export function Message({ message, abstentionText }: MessageProps) {
           message.citations.length > 0 && (
             <SourcesPanel
               citations={message.citations}
+              parts={message.parts}
               msgId={msgId}
               focus={sourceFocus}
             />
