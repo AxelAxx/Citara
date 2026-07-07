@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { streamQuery } from '../api/client'
 import type { AnswerPart, Citation } from '../api/client'
 
@@ -65,11 +65,35 @@ function emptyAssistant(): Message {
 export function useChat(verticalId: string): UseChatResult {
   const [messages, setMessages] = useState<Message[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
+  // The in-flight stream's controller — null when nothing is streaming.
+  const abortRef = useRef<AbortController | null>(null)
+  // Monotonic thread id, bumped on every vertical switch. A send belongs to
+  // the thread it started in; after a reset its late callbacks (the abort
+  // rejection, the finally) must not touch the fresh thread's state.
+  const threadRef = useRef(0)
+
+  // Switching verticals resets the conversation: the transcript belongs to
+  // the vertical it was grounded in, and letting an in-flight legal answer
+  // land in the fresh health thread would mix corpora in one thread (bug d).
+  // Cancel first, then wipe. Runs on mount too — aborting nothing and
+  // emptying an empty list are both no-ops, so no first-run guard is needed.
+  useEffect(() => {
+    threadRef.current += 1
+    abortRef.current?.abort() // no-op guard: null when no stream is in flight
+    abortRef.current = null
+    setMessages([])
+    // Re-enable the composer immediately; the aborted send's own finally is
+    // thread-guarded and won't race a query already started here.
+    setIsStreaming(false)
+  }, [verticalId])
 
   // Functional updates throughout: token events arrive faster than renders,
   // and reading `messages` from the closure would drop tokens.
   const patchLast = (patch: (message: Message) => Message) => {
     setMessages((prev) => {
+      // A reset may have emptied the thread while a stale callback (late
+      // watchdog timer) was pending — patching nothing is the right no-op.
+      if (prev.length === 0) return prev
       const next = prev.slice()
       next[next.length - 1] = patch(next[next.length - 1])
       return next
@@ -78,6 +102,9 @@ export function useChat(verticalId: string): UseChatResult {
 
   const send = async (query: string) => {
     if (isStreaming) return // one in-flight query; the composer is disabled anyway
+    const thread = threadRef.current
+    const controller = new AbortController()
+    abortRef.current = controller
     setIsStreaming(true)
     setMessages((prev) => [
       ...prev,
@@ -152,8 +179,12 @@ export function useChat(verticalId: string): UseChatResult {
             error: event.message,
           }))
         },
-      })
+      }, controller.signal)
     } catch (err) {
+      // A deliberate cancel (vertical switch aborted us) is not an error:
+      // the thread that could display it is already gone. Return early —
+      // the finally below still clears the watchdog.
+      if (controller.signal.aborted) return
       // Transport-level failure (API process down mid-stream); HTTP-level
       // errors already arrived via onError.
       patchLast((m) => ({
@@ -164,7 +195,12 @@ export function useChat(verticalId: string): UseChatResult {
       }))
     } finally {
       clearAnchoringTimer()
-      setIsStreaming(false)
+      // Thread guard: after a switch this send's cleanup must not clobber
+      // the fresh thread (e.g. re-enabling the composer mid-query there).
+      if (threadRef.current === thread) {
+        setIsStreaming(false)
+        abortRef.current = null
+      }
     }
   }
 

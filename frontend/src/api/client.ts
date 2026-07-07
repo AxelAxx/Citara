@@ -157,11 +157,17 @@ export async function streamQuery(
   verticalId: string,
   query: string,
   handlers: StreamHandlers,
+  // Cancellation: aborting tears down the fetch AND the body reader, so the
+  // next read() rejects with an AbortError that propagates to the caller.
+  // Deliberate cancels (vertical switch) are the caller's to recognize —
+  // this function treats them as any other rejected read.
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/verticals/${verticalId}/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
+    signal,
   })
   if (!res.ok || !res.body) {
     // Pre-stream failures (unknown vertical, retrieval down) arrive as the
