@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type { AnswerPart } from '../../api/client'
 import type { Message as ChatMessage } from '../../hooks/useChat'
 import { BrandMark } from '../BrandMark'
@@ -58,6 +58,12 @@ function renderParts(
   msgId: string,
   onCite: (n: number) => void,
 ): ReactNode[] {
+  // Entry-stagger order: every chip in the message mounts in the same commit
+  // (the done event), so their CSS entry animation needs an explicit sequence
+  // — --cite-i feeds .cite-chip-in's animation-delay (inherits to the chip).
+  // Counts cite parts only, not all parts: text between chips must not
+  // stretch the gaps.
+  let citeOrder = 0
   return parts.map((part, index) =>
     part.kind === 'text' ? (
       part.text
@@ -69,6 +75,7 @@ function renderParts(
         aria-label={`Ver fuente ${part.n}`}
         onClick={() => onCite(part.n)}
         className="mx-[2px] inline-flex"
+        style={{ '--cite-i': citeOrder++ } as CSSProperties}
       >
         <CiteChip n={part.n} variant="inline" />
       </button>

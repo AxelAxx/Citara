@@ -83,6 +83,35 @@
   animation: corpus-drawer-in 0.24s ease;
 }
 
+/* Inline CiteChip entry. The chips mount all at once when the done event's
+   parts replace the streamed prose (the anchoring gap ends), which used to
+   read as a hard jump — a short fade+scale makes them emerge instead. Only
+   the inline variant animates: the Fuentes cards mount with their panel, not
+   after a visible wait. fill-mode both keeps a stagger-delayed chip invisible
+   until its turn. Namespaced keyframes name to avoid collisions (citaraSpin,
+   corpus-drawer-in precedent). */
+@keyframes citara-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.cite-chip-in {
+  animation: citara-chip-in 0.28s ease-out both;
+  /* --cite-i: the chip's order among the answer's cite parts (set inline by
+     Message's renderParts); defaults to 0 → no stagger when unset. */
+  animation-delay: calc(var(--cite-i, 0) * 60ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cite-chip-in {
+    animation: none;
+  }
+}
+
 body {
   @apply bg-bg font-sans text-text antialiased;
 }

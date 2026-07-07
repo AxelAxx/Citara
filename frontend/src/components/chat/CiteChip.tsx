@@ -19,7 +19,9 @@ export function CiteChip({ n, variant = 'card' }: CiteChipProps) {
       ? 'h-[22px] min-w-[22px] text-[13px]'
       : // align-[2px]: a gentle superscript lift without <sup> — the browser's
         // vertical-align:super is what misaligned the EmptyState chip before.
-        'h-4 min-w-4 align-[2px] text-[10.5px]'
+        // cite-chip-in (index.css): entry fade+scale — inline chips mount in
+        // one batch when the done parts land, and without it they pop in.
+        'h-4 min-w-4 align-[2px] text-[10.5px] cite-chip-in'
   return (
     <span
       className={`inline-flex items-center justify-center rounded-[5px] border border-[var(--accent-line)] bg-[var(--accent-tint)] px-1 font-mono font-semibold text-[color:var(--accent)] ${size}`}
