@@ -160,6 +160,12 @@ class RagEngine:
             # Chip strategy per vertical — data too; the Generator consumes
             # the mode, core never branches on the Vertical itself.
             inline_citation_mode=config.inline_citation_mode,
+            # AnchorVerifier wiring: the SAME embedder ingest/query use (rule
+            # 4 — sentence vectors must live in the corpus's vector space) plus
+            # the two calibrated bounds, config data like everything above.
+            embedder=embedder,
+            anchor_repair_margin=config.anchor_repair_margin,
+            anchor_support_floor=config.anchor_support_floor,
         )
         return cls(
             retriever=retriever,

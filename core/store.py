@@ -86,6 +86,10 @@ class QueryHit:
     text: str
     metadata: dict
     distance: float | None = None
+    # The chunk's STORED embedding, returned by the same query call (no
+    # re-embedding) so the AnchorVerifier can score sentence↔chunk support
+    # downstream. Optional like distance: absence must never break retrieval.
+    embedding: Embedding | None = None
 
 
 class VectorStore:
@@ -188,7 +192,14 @@ class VectorStore:
             )
 
         # Chroma rejects where={} — only pass the filter when one was given.
-        kwargs: dict = {"query_embeddings": [embedding], "n_results": top_k}
+        # "embeddings" added to Chroma's default include set: the stored
+        # vectors come back in this SAME call, so anchor-support verification
+        # never pays a second embedding pass over the corpus.
+        kwargs: dict = {
+            "query_embeddings": [embedding],
+            "n_results": top_k,
+            "include": ["embeddings", "documents", "metadatas", "distances"],
+        }
         if where:
             kwargs["where"] = where
 
@@ -243,14 +254,22 @@ class VectorStore:
         """Map Chroma's list-of-lists response (one inner list per query) to QueryHits.
 
         We always query with a single embedding, so we read index ``[0]`` of each
-        parallel array. ``distances`` may be absent depending on Chroma's include
-        defaults; treat it as optional rather than assuming its presence.
+        parallel array. ``distances``/``embeddings`` may be absent depending on
+        Chroma's include set; treat both as optional rather than assuming presence.
         """
         ids = (raw.get("ids") or [[]])[0]
         documents = (raw.get("documents") or [[]])[0]
         metadatas = (raw.get("metadatas") or [[]])[0]
         distances_outer = raw.get("distances")
         distances = distances_outer[0] if distances_outer else [None] * len(ids)
+        # `is not None` instead of truthiness: Chroma returns numpy arrays for
+        # embeddings, and bool(ndarray) raises on more than one element.
+        embeddings_outer = raw.get("embeddings")
+        embeddings = (
+            embeddings_outer[0]
+            if embeddings_outer is not None and len(embeddings_outer) > 0
+            else [None] * len(ids)
+        )
 
         return [
             QueryHit(
@@ -258,9 +277,11 @@ class VectorStore:
                 text=text or "",
                 metadata=metadata or {},
                 distance=distance,
+                # list(): numpy row → the domain's plain Embedding alias.
+                embedding=list(vector) if vector is not None else None,
             )
-            for id_, text, metadata, distance in zip(
-                ids, documents, metadatas, distances
+            for id_, text, metadata, distance, vector in zip(
+                ids, documents, metadatas, distances, embeddings
             )
         ]
 

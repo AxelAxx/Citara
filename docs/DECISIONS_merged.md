@@ -87,3 +87,26 @@ does not bundle the model (multi-GB): first-run download or ship separately; Oll
 **Consequence.** All development and review happen on localhost (uvicorn + Vite). Packaging
 is the final step — you cannot iterate UI inside an `.exe`. No packaging work during the
 migration week; this only records the target so the stack choice is made with the endgame in mind.
+
+## AnchorVerifier: relative-margin repair for structured citation anchors
+
+**Decision.** After the structured anchor pass, a deterministic AnchorVerifier scores each
+anchored sentence against every citation in its own retrieval context (cosine, chunks grouped
+by the dedup (doc, page) key) and applies: repair to the argmax when its advantage exceeds
+`anchor_repair_margin` (default 0.06); keep the model's anchor on ties (adjacent-page
+ambiguity is legitimate); discard below `anchor_support_floor` (default 0.50). The LLM
+proposes, the guard disposes - the same pattern as the abstention guard.
+
+**Why relative, not absolute.** Measured on n=40 anchored sentences (12 real queries, both
+verticals): the cos_anchored distributions of correct vs false anchors overlap massively
+(known-false anchors score 0.61-0.73, inside the correct range 0.59-0.80), so no absolute
+support threshold separates them. The argmax margin does: flagrant false anchors (TOC page
+anchored for content on another page; ictus doc anchored for a diabetes sentence) show
+margins 0.06-0.17 toward the true chunk, while legitimate adjacent-page ambiguity sits at
+0.005-0.03. Chunk embeddings come back in the SAME Chroma query (include=["embeddings", ...]),
+so verification never re-embeds the corpus; only anchored sentences are embedded (bge-m3,
+local, ms).
+
+**CALIBRABLE.** Both defaults come from that short n=40 sample. Revisit with a larger dump
+(the diagnostic script pattern) if either vertical drifts; both keys accept per-vertical
+overrides in config/<vertical>.yaml.

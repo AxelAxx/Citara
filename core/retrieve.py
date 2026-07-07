@@ -119,5 +119,13 @@ class Retriever:
 
     @staticmethod
     def _to_chunk(hit: QueryHit) -> Chunk:
-        """Map one QueryHit back to a domain Chunk via the inverse-flatten boundary."""
-        return Chunk(text=hit.text, metadata=rebuild_metadata(hit.metadata))
+        """Map one QueryHit back to a domain Chunk via the inverse-flatten boundary.
+
+        The stored embedding rides along (transient, for anchor-support
+        verification); a hit without one degrades to a Chunk without it.
+        """
+        return Chunk(
+            text=hit.text,
+            metadata=rebuild_metadata(hit.metadata),
+            embedding=hit.embedding,
+        )

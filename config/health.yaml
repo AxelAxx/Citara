@@ -28,6 +28,14 @@ top_k: 6
 # higher and its viable range doesn't overlap this one.
 relevance_threshold: 0.90
 
+# AnchorVerifier (structured mode): the deterministic post-anchoring guard.
+# Same shared defaults as legal — the separating signal is the RELATIVE margin
+# within one query's own context, which does not shift per corpus the way the
+# absolute distance distribution does. CALIBRABLE: measured on a short sample
+# (n=40 anchored sentences across verticals); override here if health drifts.
+anchor_repair_margin: 0.06
+anchor_support_floor: 0.50
+
 # Human-readable title per document_id, used in the prompt's context-block
 # header ("[Documento: <título> — <id>, pág. N]") so the model attributes the
 # REAL guide instead of inventing a name from the opaque slug. Fallback: a

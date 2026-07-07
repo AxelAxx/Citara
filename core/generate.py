@@ -34,15 +34,17 @@ Zero vertical logic here: every legal/health difference lives in the
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterator
 
-from core.embed import _model_is_available  # shared model-match rule; keep one source
+from core.embed import Embedder, _model_is_available  # shared model-match rule; keep one source
 from core.models import (
     Answer,
     AnswerPart,
     Citation,
     CiteAnchor,
     CitePart,
+    Embedding,
     InlineCitationMode,
     ModelNotPulledError,
     OllamaUnreachableError,
@@ -197,6 +199,113 @@ def _parse_anchor_json(raw: str, num_sentences: int, num_chunks: int) -> list[Ci
     return anchors
 
 
+def _cosine(a: Embedding, b: Embedding) -> float:
+    """Plain cosine similarity — pure Python on purpose (no numpy dependency
+    for one dot product; bge-m3 vectors are ~1k dims, this is microseconds)."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0  # a zero vector supports nothing; never divide by zero
+    return dot / (norm_a * norm_b)
+
+
+def verify_anchors(
+    anchors: list[CiteAnchor],
+    context: RetrievedContext,
+    sentences: list[str],
+    embedder: Embedder | None,
+    fragment_to_citation: list[int],
+    *,
+    repair_margin: float,
+    support_floor: float,
+) -> list[CiteAnchor]:
+    """AnchorVerifier: the LLM proposes, this deterministic guard disposes.
+
+    The anchor pass emits IN-RANGE but sometimes semantically FALSE anchors
+    (measured: a TOC page anchored for content living on another page; an
+    ictus chunk anchored for a diabetes sentence). Each anchored sentence is
+    scored (cosine) against every citation of ITS OWN context — chunks grouped
+    by the same dedup key ``fragment_to_citation`` encodes, so two chunks of
+    one (doc, page) count as one target and a same-page sibling never
+    triggers a repair. Three branches, in precedence order:
+
+      * discard: the context argmax is below ``support_floor`` — nothing the
+        model saw supports the sentence, so no chip at all;
+      * repair:  the argmax beats the anchored citation by more than
+        ``repair_margin`` — remap to the argmax's best chunk. RELATIVE margin
+        on purpose: absolute thresholds measurably do not separate true from
+        false anchors (a known-false anchor scored 0.73, above the correct
+        median);
+      * keep:    small margins are legitimate ambiguity (adjacent pages with
+        the same content sit at 0.005-0.03) — repairing them would churn.
+
+    ADDITIVE like the anchor pass itself: no embedder wired (plain-constructor
+    engines, tests), a chunk without its stored embedding, or a transient
+    embedding failure all degrade to keeping the model's anchors — never a
+    broken answer (rules 3/5).
+    """
+    if not anchors or embedder is None:
+        return anchors
+    if any(chunk.embedding is None for chunk in context):
+        # All-or-nothing: scoring over a partial context could repair toward
+        # whatever happens to carry a vector — worse than not verifying.
+        return anchors
+
+    # citation n -> its context chunk indexes (0-based), REUSING the dedup
+    # remap instead of re-deriving the (doc, page) grouping here.
+    chunks_by_citation: dict[int, list[int]] = {}
+    for chunk_pos, citation_n in enumerate(fragment_to_citation):
+        chunks_by_citation.setdefault(citation_n, []).append(chunk_pos)
+
+    sentence_embeddings: dict[int, Embedding] = {}
+    verified: list[CiteAnchor] = []
+    for anchor in anchors:
+        if anchor.sentence_index not in sentence_embeddings:
+            try:
+                sentence_embeddings[anchor.sentence_index] = embedder.embed_query(
+                    sentences[anchor.sentence_index - 1].strip()
+                )
+            except RagEngineError:
+                # Transient embedding failure: keep this anchor unverified
+                # rather than dropping a chip the answer already earned.
+                verified.append(anchor)
+                continue
+        sentence_embedding = sentence_embeddings[anchor.sentence_index]
+
+        # Citation-level score: the best of its chunks (and WHICH chunk, so a
+        # repair lands on a real fragment index).
+        best_by_citation = {
+            citation_n: max(
+                (_cosine(sentence_embedding, context[pos].embedding), pos)
+                for pos in positions
+            )
+            for citation_n, positions in chunks_by_citation.items()
+        }
+        anchored_n = fragment_to_citation[anchor.chunk_index - 1]
+        cos_anchored = best_by_citation[anchored_n][0]
+        argmax_n = max(best_by_citation, key=lambda n: best_by_citation[n][0])
+        cos_max, best_pos = best_by_citation[argmax_n]
+
+        # Exactly three branches, in precedence order. The floor is evaluated
+        # ONCE, on cos_max: with a supported best target and a non-decisive
+        # margin, the anchored citation is within delta of that support —
+        # legitimate ambiguity, so discarding it there would be a false
+        # negative chip (rule 3: honest visibility of what IS supported).
+        if cos_max < support_floor:
+            continue  # discard: even the best target is unsupported
+        if cos_max - cos_anchored > repair_margin:
+            verified.append(
+                CiteAnchor(
+                    sentence_index=anchor.sentence_index,
+                    chunk_index=best_pos + 1,
+                )
+            )
+            continue
+        verified.append(anchor)  # keep: small margin = legitimate ambiguity
+    return verified
+
+
 def _parts_from_anchors(
     sentences: list[str],
     anchors: list[CiteAnchor],
@@ -298,6 +407,9 @@ class Generator:
         temperature: float = _DEFAULT_TEMPERATURE,
         document_titles: dict[str, str] | None = None,
         inline_citation_mode: InlineCitationMode = "off",
+        embedder: Embedder | None = None,
+        anchor_repair_margin: float = 0.06,
+        anchor_support_floor: float = 0.50,
     ) -> None:
         self.llm_model = llm_model
         self.ollama_base_url = ollama_base_url.rstrip("/")
@@ -313,6 +425,13 @@ class Generator:
         # the config default) skips it entirely. Plain data, no branching by
         # vertical — the Generator only ever consults the mode.
         self.inline_citation_mode: InlineCitationMode = inline_citation_mode
+        # AnchorVerifier wiring: the sentence-embedding port plus the two
+        # calibrated bounds (VerticalConfig, injected by the engine like every
+        # other config value). None ⇒ verification skipped — plain-constructor
+        # engines and unit tests keep working, the verifier stays additive.
+        self.embedder = embedder
+        self.anchor_repair_margin = anchor_repair_margin
+        self.anchor_support_floor = anchor_support_floor
 
     # --- the use case --------------------------------------------------------
 
@@ -450,9 +569,21 @@ class Generator:
 
         sentences = split_into_sentences(text)
         anchors = self.anchor_citations(sentences, context)
+        # AnchorVerifier: between the anchor pass and assembly — repair
+        # in-range-but-false anchors by relative margin before any CitePart
+        # is born from them (see verify_anchors).
+        anchors = verify_anchors(
+            anchors,
+            context,
+            sentences,
+            self.embedder,
+            fragment_to_citation,
+            repair_margin=self.anchor_repair_margin,
+            support_floor=self.anchor_support_floor,
+        )
         if not anchors:
-            # Degraded (anchor pass failed or found nothing): answer without
-            # chips, never a broken answer.
+            # Degraded (anchor pass failed, found nothing, or nothing survived
+            # verification): answer without chips, never a broken answer.
             return text, [TextPart(text=text)]
         return text, _parts_from_anchors(sentences, anchors, fragment_to_citation)
 

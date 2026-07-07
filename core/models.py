@@ -80,6 +80,12 @@ class Chunk(BaseModel):
 
     text: str
     metadata: ChunkMetadata
+    # Transient retrieval payload: the chunk's STORED vector, populated by the
+    # Retriever from the VectorStore hit so the AnchorVerifier can score
+    # sentence↔chunk support without re-embedding. NOT part of the canonical
+    # value object: never persisted from here, and None everywhere outside the
+    # retrieval path (ingest-side Chunks don't carry it).
+    embedding: Embedding | None = None
 
 
 class Query(BaseModel):
@@ -330,6 +336,14 @@ class VerticalConfig(BaseModel):
     # a vertical that does not opt in never pays the second anchor-pass LLM
     # call — safe degradation to answer + sources panel, today's baseline.
     inline_citation_mode: InlineCitationMode = "off"
+    # AnchorVerifier calibration (structured mode only). Unlike
+    # relevance_threshold these DO default: the verifier's separating signal is
+    # the RELATIVE margin within one query's own context, which — unlike the
+    # absolute distance distribution — does not shift per corpus, so a shared
+    # default is meaningful and a vertical may still override. Both measured on
+    # a short sample (n=40 anchored sentences) — calibrable, see DECISIONS.
+    anchor_repair_margin: float = Field(default=0.06, gt=0.0)
+    anchor_support_floor: float = Field(default=0.50, ge=0.0)
     ollama_base_url: str = "http://localhost:11434"
     # Presentation data consumed by the App's empty chat state (suggested Queries,
     # in Spanish — corpus-facing data, not code). Optional on purpose: a Vertical

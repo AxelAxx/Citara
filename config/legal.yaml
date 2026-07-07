@@ -26,6 +26,15 @@ top_k: 6
 # distribution sits lower and its viable range doesn't overlap this one.
 relevance_threshold: 1.05
 
+# AnchorVerifier (structured mode): the deterministic post-anchoring guard.
+# repair_margin: min cosine advantage the context argmax needs over the
+# anchored citation to repair the anchor; support_floor: absolute cosine below
+# which an anchor is discarded. Relative-margin rule on purpose — an absolute
+# threshold does not separate true/false anchors (measured). CALIBRABLE: both
+# values come from a short sample (n=40 anchored sentences across verticals).
+anchor_repair_margin: 0.06
+anchor_support_floor: 0.50
+
 # Human-readable title per document_id, used in the prompt's context-block
 # header ("[Documento: <título> — <id>, pág. N]") so the model attributes the
 # REAL norm instead of hallucinating one from the opaque BOE id. Fallback: a
