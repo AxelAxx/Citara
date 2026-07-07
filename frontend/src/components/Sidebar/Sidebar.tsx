@@ -99,9 +99,12 @@ export function Sidebar({
         onNew={onNewConversation}
       />
 
-      <div className="mt-auto border-t border-border px-1 pt-[14px] text-[11px] leading-[1.5] text-faint">
-        Citara v{CITARA_VERSION} — todo el procesamiento ocurre en tu equipo.
+      {/* gap-[14px] mirrors the footer's own pt-[14px] rhythm — the version
+          text needs clear air under the quit button (its former mt-3 gap
+          belonged to the pre-reorder layout). */}
+      <div className="mt-auto flex flex-col gap-[14px] border-t border-border px-1 pt-[14px] text-[11px] leading-[1.5] text-faint">
         <QuitButton onClick={onQuit} />
+        Citara v{CITARA_VERSION} — todo el procesamiento ocurre en tu equipo.
       </div>
     </aside>
   )
