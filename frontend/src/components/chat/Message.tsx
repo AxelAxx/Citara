@@ -66,7 +66,24 @@ function renderParts(
   let citeOrder = 0
   return parts.map((part, index) =>
     part.kind === 'text' ? (
-      part.text
+      parts[index + 1]?.kind === 'cite' ? (
+        // The sentence that anchors the next chip flashes as the chip fades
+        // in (cite-flash, index.css) so the citation doesn't pop out of inert
+        // text. Same --cite-i as that chip: citeOrder is read BEFORE the
+        // chip's ++ so both share the stagger slot and pulse together. The
+        // whole TextPart is wrapped — core already splits the prose at cite
+        // boundaries, so re-segmenting sentences here would be redundant.
+        // Purely presentational: the text stays verbatim.
+        <span
+          key={`t-${index}`}
+          className="cite-flash"
+          style={{ '--cite-i': citeOrder } as CSSProperties}
+        >
+          {part.text}
+        </span>
+      ) : (
+        part.text
+      )
     ) : (
       <button
         key={`${index}-${part.n}`}

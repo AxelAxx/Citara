@@ -106,8 +106,34 @@
      Message's renderParts); defaults to 0 → no stagger when unset. */
   animation-delay: calc(var(--cite-i, 0) * 60ms);
 }
+/* Anchored-sentence flash. The flash ties each sentence to the chip born
+   from it, so the citation doesn't appear detached from an inert text: the
+   sentence lights up (accent tint) while its chip fades in — same --cite-i,
+   same stagger delay, they pulse together — then settles back to normal.
+   box-decoration-break keeps the highlight intact across wrapped lines. */
+@keyframes cite-flash-in {
+  0% {
+    background-color: transparent;
+  }
+  30% {
+    background-color: var(--accent-tint);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.cite-flash {
+  animation: cite-flash-in 0.9s ease-out both;
+  /* sync with the chip stagger (.cite-chip-in uses the same formula) */
+  animation-delay: calc(var(--cite-i, 0) * 60ms);
+  border-radius: 3px; /* soft highlight edges */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cite-chip-in {
+  .cite-chip-in,
+  .cite-flash {
     animation: none;
   }
 }
