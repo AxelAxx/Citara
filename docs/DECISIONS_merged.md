@@ -121,3 +121,16 @@ captures both measured false-anchor cases with slack and keeps ~0.02 over the ch
 Global, not per-vertical: the decision band is thin (n=40 + one live smoke) and the data does
 not distinguish legal from health. support_floor unchanged (0.50). Calibrable, not sacred -
 re-run the calibration dump before trusting either number on a new corpus.
+
+## Known limitation: first-person out-of-corpus queries break the 7B abstention discipline
+
+First-person out-of-corpus queries (e.g. "Cuanto IRPF me toca pagar este anio?") break the
+abstention discipline in the 7B: retrieval passes the gate on topical proximity (LGT chunks
+for a tax question) but lacks the answer, and the model emits a polite prose decline ("Lo
+siento...") instead of the exact abstention phrase. With resolved-state authority this
+surfaces as a non-answer with a visible sources panel (and occasionally anchored chips on the
+sentence that merely describes the fragments). PREEXISTING (measured in baseline 34a92f9),
+NOT caused by the first-person bridge (measured identical with bridge v1, hardened bridge,
+and amplified-protocol variants), and NOT fixable by prompt (3 prompt variants tried,
+identical failure 3/3 each). Candidate future fix: deterministic prose-decline detection in
+core, or accept as a 7B limitation. Tracked, not built.
