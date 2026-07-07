@@ -110,3 +110,14 @@ local, ms).
 **CALIBRABLE.** Both defaults come from that short n=40 sample. Revisit with a larger dump
 (the diagnostic script pattern) if either vertical drifts; both keys accept per-vertical
 overrides in config/<vertical>.yaml.
+
+**Adjustment: anchor_repair_margin 0.06 -> 0.05 (post-live-smoke).** The 0.06 default sat ON
+the upper edge of the measured true positives, not above it: in the live smoke on f7b1097 the
+HTA repair fired at margin 0.0600 by a hair, and the glucemia false anchor (an ictus chunk
+cited for a diabetes sentence) stayed at 0.0597 even though the context argmax was the right
+document (diabetes-tipo-2 p.39). The legitimate-ambiguity band (adjacent pages sharing
+content) tops out around 0.03, leaving 0.03-0.057 empty; 0.05 sits inside that gap - it
+captures both measured false-anchor cases with slack and keeps ~0.02 over the churn band.
+Global, not per-vertical: the decision band is thin (n=40 + one live smoke) and the data does
+not distinguish legal from health. support_floor unchanged (0.50). Calibrable, not sacred -
+re-run the calibration dump before trusting either number on a new corpus.

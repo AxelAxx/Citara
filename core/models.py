@@ -340,9 +340,12 @@ class VerticalConfig(BaseModel):
     # relevance_threshold these DO default: the verifier's separating signal is
     # the RELATIVE margin within one query's own context, which — unlike the
     # absolute distance distribution — does not shift per corpus, so a shared
-    # default is meaningful and a vertical may still override. Both measured on
-    # a short sample (n=40 anchored sentences) — calibrable, see DECISIONS.
-    anchor_repair_margin: float = Field(default=0.06, gt=0.0)
+    # default is meaningful and a vertical may still override. Seeded on a
+    # short sample (n=40 anchored sentences), margin then refined to 0.05 with
+    # the live smoke on f7b1097 (true-positive margins landed AT 0.06, e.g.
+    # glucemia 0.0597) — centered in the empty 0.03–0.057 gap above the
+    # legitimate-ambiguity band. Calibrable, see DECISIONS.
+    anchor_repair_margin: float = Field(default=0.05, gt=0.0)
     anchor_support_floor: float = Field(default=0.50, ge=0.0)
     ollama_base_url: str = "http://localhost:11434"
     # Presentation data consumed by the App's empty chat state (suggested Queries,

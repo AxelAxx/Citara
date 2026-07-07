@@ -30,9 +30,12 @@ relevance_threshold: 1.05
 # repair_margin: min cosine advantage the context argmax needs over the
 # anchored citation to repair the anchor; support_floor: absolute cosine below
 # which an anchor is discarded. Relative-margin rule on purpose — an absolute
-# threshold does not separate true/false anchors (measured). CALIBRABLE: both
-# values come from a short sample (n=40 anchored sentences across verticals).
-anchor_repair_margin: 0.06
+# threshold does not separate true/false anchors (measured). CALIBRABLE:
+# seeded on n=40 anchored sentences, then 0.05 refined with the live smoke on
+# f7b1097 (true-positive margins landed AT 0.06: glucemia 0.0597, HTA 0.0600)
+# — centered in the empty 0.03–0.057 gap above the legitimate-ambiguity band
+# (~0.03), not on its edge.
+anchor_repair_margin: 0.05
 anchor_support_floor: 0.50
 
 # Human-readable title per document_id, used in the prompt's context-block

@@ -31,9 +31,11 @@ relevance_threshold: 0.90
 # AnchorVerifier (structured mode): the deterministic post-anchoring guard.
 # Same shared defaults as legal — the separating signal is the RELATIVE margin
 # within one query's own context, which does not shift per corpus the way the
-# absolute distance distribution does. CALIBRABLE: measured on a short sample
-# (n=40 anchored sentences across verticals); override here if health drifts.
-anchor_repair_margin: 0.06
+# absolute distance distribution does. CALIBRABLE: seeded on n=40 anchored
+# sentences, then 0.05 refined with the live smoke on f7b1097 (glucemia's
+# false anchor sat at margin 0.0597, just under the old 0.06) — centered in
+# the empty 0.03–0.057 gap; override here if health drifts.
+anchor_repair_margin: 0.05
 anchor_support_floor: 0.50
 
 # Human-readable title per document_id, used in the prompt's context-block
