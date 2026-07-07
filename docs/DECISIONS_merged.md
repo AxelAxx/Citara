@@ -124,13 +124,12 @@ re-run the calibration dump before trusting either number on a new corpus.
 
 ## Known limitation: first-person out-of-corpus queries break the 7B abstention discipline
 
-First-person out-of-corpus queries (e.g. "Cuanto IRPF me toca pagar este anio?") break the
-abstention discipline in the 7B: retrieval passes the gate on topical proximity (LGT chunks
-for a tax question) but lacks the answer, and the model emits a polite prose decline ("Lo
-siento...") instead of the exact abstention phrase. With resolved-state authority this
-surfaces as a non-answer with a visible sources panel (and occasionally anchored chips on the
-sentence that merely describes the fragments). PREEXISTING (measured in baseline 34a92f9),
-NOT caused by the first-person bridge (measured identical with bridge v1, hardened bridge,
-and amplified-protocol variants), and NOT fixable by prompt (3 prompt variants tried,
-identical failure 3/3 each). Candidate future fix: deterministic prose-decline detection in
-core, or accept as a 7B limitation. Tracked, not built.
+First-person out-of-corpus queries (e.g. "Cuanto IRPF me toca pagar este anio?") make the 7B
+emit a polite prose decline ("Lo siento...") instead of the exact abstention phrase, surfacing
+under resolved-state authority as a non-answer with a visible sources panel. PREEXISTING
+(baseline 34a92f9), NOT caused by the first-person bridge, NOT fixable by prompt (3 prompt
+architectures tried, identical failure). Tracked, not built.
+
+Full detail — symptom, measured root cause, evidence matrix, interaction with the bug-B
+authority, candidate-fix trade-offs and the method lesson — lives in
+[`KNOWN_LIMITATION_B2_first_person_out_of_corpus.md`](./KNOWN_LIMITATION_B2_first_person_out_of_corpus.md).
