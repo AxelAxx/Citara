@@ -37,6 +37,10 @@
 | **Grounding** | The principle that every factual claim in an `Answer` must trace back to a `RetrievedContext` chunk. "Not grounded" ⇒ the Generator must abstain (see **Abstention**). | — |
 | **Abstention** | The required behaviour when `RetrievedContext` does not support an answer: the Generator says it cannot find it in the documents instead of inventing one. The opposite of a **Hallucination**. | — |
 | **Hallucination** | Any claim in an `Answer` not supported by `RetrievedContext`. The thing this architecture exists to prevent. | — |
+| **AnswerabilityGate** | Deterministic guard that decides, from query↔chunks signals only, whether `RetrievedContext` is sufficient to answer. Downstream of `Retriever`; verdict applied at the resolution boundary. Sibling of `AnchorVerifier`. | `AnswerabilityGate` |
+| **SufficiencyVerdict** | The gate's output: `SUFFICIENT` or `INSUFFICIENT`. An enum, not a bool — the reason must be legible. | `SufficiencyVerdict` (enum) |
+| **Answerability** | Whether the retrieved context *contains the answer* to the `Query`, distinct from topical relevance. B2 exists because relevance ≠ answerability. | — |
+| **top-1 margin** | Signal S1: separation between the top-ranked chunk score and the tail. | `margin` |
 
 ---
 
