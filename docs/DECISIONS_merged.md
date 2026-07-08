@@ -122,13 +122,20 @@ Global, not per-vertical: the decision band is thin (n=40 + one live smoke) and 
 not distinguish legal from health. support_floor unchanged (0.50). Calibrable, not sacred -
 re-run the calibration dump before trusting either number on a new corpus.
 
-## Known limitation: first-person out-of-corpus queries break the 7B abstention discipline
+## Known limitation → resolved for legal: first-person out-of-corpus queries
 
-First-person out-of-corpus queries (e.g. "Cuanto IRPF me toca pagar este anio?") make the 7B
-emit a polite prose decline ("Lo siento...") instead of the exact abstention phrase, surfacing
+First-person out-of-corpus queries (e.g. "Cuanto IRPF me toca pagar este anio?") used to make the
+7B emit a polite prose decline ("Lo siento...") instead of the exact abstention phrase, surfacing
 under resolved-state authority as a non-answer with a visible sources panel. PREEXISTING
 (baseline 34a92f9), NOT caused by the first-person bridge, NOT fixable by prompt (3 prompt
-architectures tried, identical failure). Tracked, not built.
+architectures tried, identical failure).
+
+**Resolved for legal (`d96917c`):** the `AnswerabilityGate` (S1 relative top-1 margin, μ=0.075,
+ON in legal via config, OFF in health) forces byte-exact abstention upstream when the retrieval
+margin is insufficient — IRPF now abstains with panel hidden, verified in vivo. Contract in
+`SPEC_B2_v2.md`. The health applied-general residual (`first_person_applied_no_bridge`) is NOT a
+context-sufficiency failure (S1 cannot see personal framing — `SPEC_B2_v2.md` §2.1) and stays
+tracked-not-built by design, routed to Stage 1 NLI.
 
 Full detail — symptom, measured root cause, evidence matrix, interaction with the bug-B
 authority, candidate-fix trade-offs and the method lesson — lives in

@@ -93,7 +93,16 @@ The 7B's helpful-assistant bias, when retrieval hands it topically close context
 any imperative return instruction. This is a capability limit of the model at this size, not
 a wording problem.
 
-## 7. Candidate future fix (NOT built)
+## 7. Fix (built for legal — `d96917c`)
+
+> **Status update (`d96917c`):** shipped, but NOT as the prose-decline guard sketched below.
+> What shipped is the `AnswerabilityGate` (S1 relative top-1 margin, μ=0.075), scoped per-vertical
+> via config — **ON for legal, OFF for health** (`SPEC_B2_v2.md`). It forces byte-exact
+> `ABSTENTION_TEXT` upstream of the resolved-state authority when the retrieval margin is
+> insufficient. Legal IRPF is closed and verified in vivo (B2-AC1). The health applied-general
+> residual (§8) stays unbuilt **by design** — not a context-sufficiency failure, the gate
+> structurally cannot see it (`SPEC_B2_v2.md` §2.1); route is Stage 1 NLI. The sketch below is
+> the original candidate, superseded by the gate.
 
 A deterministic **prose-decline guard** in `core/` (Application layer, dependencies pointing
 inward): after resolution, if the parts are NOT the abstention sentence BUT carry no
@@ -117,8 +126,7 @@ since the trigger is narrow (see Scope).
 
 ## 8. Scope / status
 
-**Tracked, not built.** Affects legal and (in all likelihood) health equally — the mechanism
-is vertical-agnostic: personal phrasing + out-of-corpus answer + topically close retrieval.
+**Legal: solved (`d96917c`, `AnswerabilityGate`, verified in vivo). Health applied-general residual: tracked, not built — by design.** Legal separates cleanly on S1 (μ=0.075); health does **not** (`SPEC_B2_v2.md` §2.1: `health-b2-001` has the highest margin in the vertical yet is not_answerable — a personal-framing/policy problem, not a retrieval-sufficiency one), so the gate is deliberately OFF there and the residual routes to Stage 1 NLI, built only if measured necessary.
 Does not block the MVP; it is an edge case requiring all three conditions at once. First
 recorded in `DECISIONS_merged.md` (commit `bdc1f17`); this document is the detailed
 reference.

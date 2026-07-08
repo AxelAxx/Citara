@@ -192,11 +192,13 @@ disabled, documented in §2.1/§3. Re-runs version new measurement artifacts wit
   RAGAS with API (not local); MiniCheck/AlignScore/HHEM (English-only); reranker FP32 (borderline
   VRAM); per-query model swapping; single absolute cosine/L2 threshold (the B2 root cause).
 
-## 11. Build order (remaining)
+## 11. Build order (done — `d96917c`)
 
-1. **Gate implementation** — `AnswerabilityGate` + `SufficiencyVerdict` in `core/`, wired into
+1. **Gate implementation** — ✅ `AnswerabilityGate` + `SufficiencyVerdict` in `core/`, wired into
    `Generator._resolve_parts`, `μ` + on/off from `VerticalConfig` (same rail as
-   `anchor_repair_margin`). Unit tests per B2-AC5.
-2. **Smoke** — legal IRPF abstains byte-exact with panel hidden; legal answerables unchanged;
-   health unchanged (gate off).
-3. **Atomic commit**, hash to the human, no push without approval.
+   `anchor_repair_margin`). Unit tests per B2-AC5 (12 tests, green).
+2. **Smoke** — ✅ legal IRPF abstains byte-exact with panel hidden; legal answerables unchanged;
+   health unchanged (gate off). Verified in vivo (`docs/audit/06-readiness.md`).
+3. **Atomic commit** — ✅ `d96917c` on origin/main.
+
+Residual (health applied-general) remains out of scope by design — see §10.

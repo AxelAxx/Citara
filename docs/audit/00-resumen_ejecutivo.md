@@ -41,7 +41,7 @@ y el drift que existe es mayoritariamente **documental**, no de código.
 4. **Abstención por estado resuelto, no por adivinar prosa** — y honestidad con su límite: B2
    (declive en prosa del 7B ante preguntas personales fuera de corpus) está medido con método
    (baseline antes de atribuir, una variable por experimento), documentado como límite de
-   capacidad del modelo, con el fix candidato diseñado y conscientemente no construido.
+   capacidad del modelo. El caso legal (IRPF) lo **resuelve el `AnswerabilityGate`** (`d96917c`): gate determinista S1 (margen relativo top-1, μ=0.075), scopeado por config —ON en legal, OFF en health— que fuerza la abstención byte-exacta aguas arriba de la autoridad resolved-state (verificado en vivo, B2-AC1). El residual health applied-general sigue **tracked, no construido** por diseño (no es fallo de suficiencia; ruta Stage 1 NLI, `SPEC_B2_v2.md` §10).
 5. **Sé exactamente dónde mi repo miente**: LangChain declarado y jamás importado (drift de
    decisión, SPEC §9), FR11 describe una app que ya no es la viva, 11 símbolos por glosar, y
    una trampa conocida en el legacy (`ui/layout.py:105`). Auditarse a uno mismo y anclar cada
