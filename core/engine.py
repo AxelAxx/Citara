@@ -166,6 +166,11 @@ class RagEngine:
             embedder=embedder,
             anchor_repair_margin=config.anchor_repair_margin,
             anchor_support_floor=config.anchor_support_floor,
+            # AnswerabilityGate (B2): per-vertical on/off + measured mu — same
+            # config rail as the verifier bounds (one definition site, zero
+            # hardcode).
+            answerability_gate_enabled=config.answerability_gate_enabled,
+            answerability_margin=config.answerability_margin,
         )
         return cls(
             retriever=retriever,

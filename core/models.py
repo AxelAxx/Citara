@@ -214,6 +214,18 @@ class CiteAnchor(BaseModel):
     chunk_index: int
 
 
+class SufficiencyVerdict(str, Enum):
+    """The AnswerabilityGate's output: can RetrievedContext answer the Query?
+
+    An enum, not a bool, on purpose (B2-NFR5): a verdict prints as its reason
+    ("insufficient") in logs and test failures, instead of an opaque True/False
+    whose meaning the reader must reconstruct from the call site.
+    """
+
+    SUFFICIENT = "sufficient"
+    INSUFFICIENT = "insufficient"
+
+
 class Answer(BaseModel):
     """Generator output: the response text plus the Citations it is grounded on.
 
@@ -354,6 +366,22 @@ class VerticalConfig(BaseModel):
     # legitimate-ambiguity band. Calibrable, see DECISIONS.
     anchor_repair_margin: float = Field(default=0.05, gt=0.0)
     anchor_support_floor: float = Field(default=0.50, ge=0.0)
+    # AnswerabilityGate (B2). Default OFF on purpose: the measured S1 signal
+    # (top-1 margin) separates answerable from not-answerable in legal but NOT
+    # in health (docs/b2/measurements/b2_margins_20260708-105727Z.md — the
+    # health anchor pair comes out inverted), so a vertical opts in via YAML
+    # only where its own measurement shows a separating band. Data, never a
+    # vertical branch (golden rule 2).
+    answerability_gate_enabled: bool = Field(default=False)
+    # mu: min relative top-1 margin ((tail_mean - d_top1) / tail_mean) for a
+    # context to count as SUFFICIENT. RELATIVE like anchor_repair_margin — and
+    # unlike relevance_threshold — because the ratio normalizes away the
+    # corpus's absolute distance scale (legal and health distances live on
+    # different scales; the margins stay comparable). No shared default: mu is
+    # MEASURED per vertical (legal band [0.0615, 0.0882) at recall/precision
+    # 1.00 → 0.075, its center); an enabled gate without one fails at config
+    # load (validator below), never a silent fallback (golden rule 5).
+    answerability_margin: float | None = Field(default=None, gt=0.0)
     ollama_base_url: str = "http://localhost:11434"
     # Presentation data consumed by the App's empty chat state (suggested Queries,
     # in Spanish — corpus-facing data, not code). Optional on purpose: a Vertical
@@ -370,6 +398,20 @@ class VerticalConfig(BaseModel):
     # Chat-header source line (e.g. "BOE · Legislación laboral"); empty ⇒ the
     # header omits it. Same optional Spanish-UI-data pattern as the trio above.
     domain_tagline: str = ""
+
+    @model_validator(mode="after")
+    def _enabled_gate_requires_margin(self) -> VerticalConfig:
+        # Same discipline as relevance_threshold's no-default rule: a silently
+        # defaulted mu would miscalibrate the gate. Enabled without a measured
+        # margin must fail at config load, not mid-query.
+        if self.answerability_gate_enabled and self.answerability_margin is None:
+            raise ValueError(
+                "answerability_gate_enabled is true but answerability_margin "
+                "is not set. mu is measured, never defaulted: set "
+                "answerability_margin from the vertical's measured band "
+                "(docs/b2/measurements/) or disable the gate."
+            )
+        return self
 
 
 # --- Domain exceptions -------------------------------------------------------

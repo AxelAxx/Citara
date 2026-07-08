@@ -51,6 +51,7 @@ from core.models import (
     Query,
     RagEngineError,
     RetrievedContext,
+    SufficiencyVerdict,
     TextPart,
 )
 
@@ -306,6 +307,66 @@ def verify_anchors(
     return verified
 
 
+def evaluate_answerability(
+    context: RetrievedContext, *, margin_threshold: float
+) -> SufficiencyVerdict:
+    """AnswerabilityGate (B2): is this context SUFFICIENT to answer, by shape?
+
+    Deterministic sibling of :func:`verify_anchors`, one step earlier in the
+    pipeline: retrieval sufficiency instead of citation anchoring. Signal S1
+    only — the relative top-1 margin over ``Chunk.distance`` (Chroma L2² in
+    its native unit, lower = closer, zero transformations). RELATIVE on
+    purpose: the ratio normalizes away the corpus's absolute distance scale
+    (measured: legal and health distributions don't even overlap), so one mu
+    semantics serves any vertical that opts in.
+
+    Measured basis (docs/b2/measurements/): B2 queries retrieve
+    topically-close-but-FLAT profiles (several look-alike chunks, no standout
+    top-1); answerable queries show a standout. INSUFFICIENT when the margin
+    sits under the vertical's measured mu.
+    """
+    distances: list[float] = []
+    for chunk in context:
+        if chunk.distance is None:
+            # Never recompute, never assume: a retrieval-path Chunk without its
+            # distance means the transient propagation broke, and a silent
+            # SUFFICIENT would disable the gate invisibly (B2-NFR6).
+            raise RagEngineError(
+                "AnswerabilityGate received a retrieved Chunk without a "
+                "distance. The transient-distance propagation "
+                "(Retriever._to_chunk -> Chunk.distance) is broken; fix "
+                "core/retrieve.py — the gate never recomputes distances."
+            )
+        distances.append(chunk.distance)
+
+    if not distances:
+        # Empty context is the HARD abstention guard's jurisdiction (it fires
+        # before any LLM call, so this gate is never consulted for n=0). If a
+        # caller asks anyway, sufficiency is not this gate's call — pass through.
+        return SufficiencyVerdict.SUFFICIENT
+    if len(distances) == 1:
+        # No tail ⇒ no margin signal, and absence of signal is NEVER grounds
+        # to abstain (SPEC_B2 v2 §5.1: an answerable control retrieves n=1).
+        # This verdict means "no basis to override", not "measured sufficient".
+        return SufficiencyVerdict.SUFFICIENT
+
+    d_top1 = distances[0]  # nearest-first is the Retriever's ordering contract
+    tail = distances[1:]
+    tail_mean = sum(tail) / len(tail)
+    if tail_mean == 0.0:
+        # Gate-passing L2² distances are strictly positive; a zero tail mean is
+        # corrupt data, not a measurable margin — refuse to divide.
+        raise RagEngineError(
+            "AnswerabilityGate: tail_mean is 0.0, so the relative margin is "
+            "undefined — the retrieved distances look corrupt. Re-ingest the "
+            "vertical and check the VectorStore before trusting any verdict."
+        )
+    margin = (tail_mean - d_top1) / tail_mean
+    if margin < margin_threshold:
+        return SufficiencyVerdict.INSUFFICIENT
+    return SufficiencyVerdict.SUFFICIENT
+
+
 def _parts_from_anchors(
     sentences: list[str],
     anchors: list[CiteAnchor],
@@ -422,6 +483,8 @@ class Generator:
         embedder: Embedder | None = None,
         anchor_repair_margin: float = 0.06,
         anchor_support_floor: float = 0.50,
+        answerability_gate_enabled: bool = False,
+        answerability_margin: float | None = None,
     ) -> None:
         self.llm_model = llm_model
         self.ollama_base_url = ollama_base_url.rstrip("/")
@@ -444,6 +507,18 @@ class Generator:
         self.embedder = embedder
         self.anchor_repair_margin = anchor_repair_margin
         self.anchor_support_floor = anchor_support_floor
+        # AnswerabilityGate wiring (B2): per-vertical on/off + measured mu,
+        # injected from VerticalConfig like the verifier bounds above. The
+        # config validator already forbids enabled-without-mu; re-checked here
+        # because the plain constructor bypasses config — fail at wiring, not
+        # mid-query (golden rule 5).
+        if answerability_gate_enabled and answerability_margin is None:
+            raise ValueError(
+                "answerability_gate_enabled=True requires answerability_margin "
+                "(the vertical's measured mu). Pass both, or disable the gate."
+            )
+        self.answerability_gate_enabled = answerability_gate_enabled
+        self.answerability_margin = answerability_margin
 
     # --- the use case --------------------------------------------------------
 
@@ -594,6 +669,20 @@ class Generator:
             repair_margin=self.anchor_repair_margin,
             support_floor=self.anchor_support_floor,
         )
+        # AnswerabilityGate (B2), only where the vertical opted in: when the
+        # retrieval SHAPE says the context cannot answer (flat top-1 margin
+        # under the measured mu), the resolved state BECOMES the canonical
+        # abstention — parts replaced whole, zero CiteParts. Bug B's byte-exact
+        # authority downstream (query.py) then resolves is_abstention on its
+        # own: no new decision path in the API, no prose matching anywhere.
+        if (
+            self.answerability_gate_enabled
+            and evaluate_answerability(
+                context, margin_threshold=self.answerability_margin
+            )
+            is SufficiencyVerdict.INSUFFICIENT
+        ):
+            return ABSTENTION_TEXT, [TextPart(text=ABSTENTION_TEXT)]
         if not anchors:
             # Degraded (anchor pass failed, found nothing, or nothing survived
             # verification): answer without chips, never a broken answer.

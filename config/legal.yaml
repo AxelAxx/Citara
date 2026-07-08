@@ -38,6 +38,18 @@ relevance_threshold: 1.05
 anchor_repair_margin: 0.05
 anchor_support_floor: 0.50
 
+# AnswerabilityGate (B2): deterministic abstention when the retrieval SHAPE says
+# the context cannot answer — a flat top-1 margin (several topically-close
+# chunks, no standout) instead of a clear best hit. S1-only, relative margin
+# (tail_mean - d_top1) / tail_mean over Chroma L2² distances. MEASURED, not
+# guessed: on the labeled set (docs/b2/b2_answerability_set.yaml over the live
+# corpus, docs/b2/measurements/b2_margins_20260708-105727Z.md) the
+# recall-1.00 / precision-1.00 operating band is [0.0615, 0.0882); 0.075 is its
+# center. Health keeps the gate OFF (its S1 does not separate: anchor pair
+# inverted — see SPEC_B2_v2 §2.1).
+answerability_gate_enabled: true
+answerability_margin: 0.075
+
 # Human-readable title per document_id, used in the prompt's context-block
 # header ("[Documento: <título> — <id>, pág. N]") so the model attributes the
 # REAL norm instead of hallucinating one from the opaque BOE id. Fallback: a
