@@ -1,0 +1,19 @@
+id,vertical,label,category,first_person,n_chunks,d_top1,d_rank2,tail_mean,tail_median,margin_additive_mean,margin_additive_median,margin_relative,status,all_distances
+legal-b2-001,legal,not_answerable,b2_first_person_out_of_corpus,True,6,0.905284,0.949025,0.964568,0.964109,0.059284,0.058825,0.061461,measured,0.905284;0.949025;0.951717;0.964109;0.978466;0.979522
+legal-b2-002,legal,not_answerable,b2_first_person_out_of_corpus,True,6,0.921154,0.925240,0.935156,0.940179,0.014002,0.019025,0.014973,measured,0.921154;0.925240;0.928007;0.940179;0.940998;0.941356
+legal-b2-003,legal,not_answerable,b2_first_person_out_of_corpus,True,6,0.902064,0.927863,0.946942,0.932186,0.044879,0.030122,0.047393,measured,0.902064;0.927863;0.929028;0.932186;0.959640;0.985995
+legal-b2-004,legal,not_answerable,b2_first_person_out_of_corpus,True,0,,,,,,,,hard-abstain (sin gate),
+legal-bridge-001,legal,answerable,first_person_in_corpus_bridge,True,6,0.674478,0.756704,0.833734,0.845559,0.159256,0.171082,0.191015,measured,0.674478;0.756704;0.838810;0.845559;0.852113;0.875482
+legal-bridge-002,legal,answerable,first_person_in_corpus_bridge,True,6,0.700148,0.722701,0.767912,0.773914,0.067764,0.073766,0.088244,measured,0.700148;0.722701;0.758844;0.773914;0.791474;0.792626
+legal-plain-001,legal,answerable,plain_answerable_in_corpus,False,6,0.788831,0.793947,0.867681,0.884871,0.078850,0.096040,0.090874,measured,0.788831;0.793947;0.856124;0.884871;0.894976;0.908487
+legal-plain-002,legal,answerable,plain_answerable_in_corpus,False,6,0.641177,0.659516,0.707211,0.714281,0.066034,0.073105,0.093372,measured,0.641177;0.659516;0.712380;0.714281;0.723693;0.726182
+legal-ood-001,legal,not_answerable,out_of_domain,False,0,,,,,,,,hard-abstain (sin gate),
+legal-ood-002,legal,not_answerable,out_of_domain,False,0,,,,,,,,hard-abstain (sin gate),
+health-b2-001,health,not_answerable,first_person_applied_no_bridge,True,6,0.769887,0.824669,0.851232,0.855321,0.081345,0.085434,0.095561,measured,0.769887;0.824669;0.853069;0.855321;0.859899;0.863202
+health-b2-002,health,not_answerable,b2_first_person_out_of_corpus,True,6,0.846097,0.873823,0.892203,0.897378,0.046106,0.051280,0.051676,measured,0.846097;0.873823;0.892234;0.897378;0.898784;0.898798
+health-b2-003,health,not_answerable,first_person_applied_no_bridge,True,6,0.750009,0.760327,0.772146,0.769684,0.022137,0.019675,0.028669,measured,0.750009;0.760327;0.765331;0.769684;0.774150;0.791236
+health-b2-004,health,not_answerable,b2_first_person_out_of_corpus,True,6,0.688125,0.707418,0.728117,0.728377,0.039992,0.040252,0.054925,measured,0.688125;0.707418;0.725063;0.728377;0.734246;0.745481
+health-plain-001,health,answerable,plain_answerable_in_corpus,False,6,0.722259,0.729324,0.765322,0.768425,0.043063,0.046166,0.056268,measured,0.722259;0.729324;0.763117;0.768425;0.778071;0.787675
+health-plain-002,health,answerable,plain_answerable_in_corpus,False,6,0.612766,0.638177,0.665060,0.671473,0.052293,0.058707,0.078630,measured,0.612766;0.638177;0.662928;0.671473;0.675050;0.677670
+health-plain-003,health,answerable,plain_answerable_in_corpus,False,1,0.869535,,,,,,,no-tail,0.869535
+health-ood-001,health,not_answerable,out_of_domain,False,0,,,,,,,,hard-abstain (sin gate),

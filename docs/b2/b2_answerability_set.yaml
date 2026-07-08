@@ -1,0 +1,249 @@
+# B2 answerability calibration set
+#
+# Purpose: ground-truth labels to calibrate the AnswerabilityGate thresholds (mu, kappa)
+#          and the combination operator, per SPEC_B2 section 9. Queries are DATA (Spanish,
+#          user-facing); schema keys and enum values are code (English).
+#
+# Field reference
+#   label            answerable      => gate must NOT abstain (verdict SUFFICIENT)
+#                    not_answerable  => gate MUST abstain      (verdict INSUFFICIENT)
+#   category         segment for per-cell metrics. Calibration is decided on the CONFUSABLE
+#                    pair: b2_first_person_out_of_corpus (abstain) vs
+#                    first_person_in_corpus_bridge (answer). Same phenomenology, opposite
+#                    label. Grow THESE cells first if per-cell metrics come out noisy.
+#   expected_behavior  answer | abstain | bridge_to_general
+#                    NOTE: bridge_to_general exists in LEGAL only. In HEALTH, first-person
+#                    applied questions abstain (no bridge) by the sensitive-advice boundary
+#                    (health prompt deliberately did NOT get the c0f78af bridge).
+#   first_person     phrasing is personal/applied (a B2 precondition).
+#   rationale        why this label; what retrieval is expected to look like (margin/coverage).
+#
+# Method note: these queries are designed here; the real (margin, coverage) signals are
+# produced by running them over the LIVE corpus + ChromaDB (Claude Code), NOT assumed. The
+# rationale describes the EXPECTED retrieval shape, to be confirmed against measured values
+# before any threshold is committed.
+
+meta:
+  spec: SPEC_B2.md#9
+  status: seed              # expand confusable cells if per-cell metrics are noisy
+  labels: [answerable, not_answerable]
+  categories:
+    - b2_first_person_out_of_corpus     # not_answerable — the canonical break
+    - first_person_in_corpus_bridge     # answerable — legal only; the dangerous false positive
+    - first_person_applied_no_bridge    # not_answerable — health; applied question, no bridge
+    - plain_answerable_in_corpus        # answerable — positive control
+    - out_of_domain                     # not_answerable — easy control, retrieval NOT close
+  target: "abstention recall >= ~0.9 without degrading answerable precision (SPEC_B2 AC3)"
+
+queries:
+
+  # ---------------------------------------------------------------------------
+  # LEGAL
+  # ---------------------------------------------------------------------------
+
+  - id: legal-b2-001
+    vertical: legal
+    query: "¿Cuánto IRPF me toca pagar este año?"
+    label: not_answerable
+    category: b2_first_person_out_of_corpus
+    first_person: true
+    expected_behavior: abstain
+    rationale: >
+      Personal tax owed depends on income/deductions, absent from corpus. Retrieval pulls
+      Ley 58/2003 (General Tributaria) chunks on topical proximity: expect flat top-1 margin
+      and low key-term coverage (no "modelo 100" / personal figures present). The archetypal B2.
+
+  - id: legal-b2-002
+    vertical: legal
+    query: "¿Cuánto IVA tengo que pagar por mi factura de autónomo?"
+    label: not_answerable
+    category: b2_first_person_out_of_corpus
+    first_person: true
+    expected_behavior: abstain
+    rationale: >
+      Concrete amount depends on the specific invoice. Retrieval surfaces VAT-regime chunks
+      (topical) that do not contain the personal figure. Expect flat margin, low coverage.
+
+  - id: legal-b2-003
+    vertical: legal
+    query: "¿Cuánto me quedaría de pensión cuando me jubile?"
+    label: not_answerable
+    category: b2_first_person_out_of_corpus
+    first_person: true
+    expected_behavior: abstain
+    rationale: >
+      Personal pension depends on the individual contribution history. Retrieval pulls
+      Seguridad Social norms (topical) without the personal computation. Flat/plateau profile.
+
+  - id: legal-b2-004
+    vertical: legal
+    query: "¿Me conviene hacerme autónomo o montar una SL para mi negocio?"
+    label: not_answerable
+    category: b2_first_person_out_of_corpus
+    first_person: true
+    expected_behavior: abstain
+    rationale: >
+      A personal decision/advice request, not a norm in corpus. Retrieval brings company/tax
+      law chunks (domain terms) with no answer to the applied question. Low key-term coverage.
+
+  - id: legal-bridge-001
+    vertical: legal
+    query: "¿Cuántos días de vacaciones tengo?"
+    label: answerable
+    category: first_person_in_corpus_bridge
+    first_person: true
+    expected_behavior: bridge_to_general
+    rationale: >
+      The solved sibling (bridge c0f78af). Personal figure absent, but the GENERAL rule
+      (Estatuto de los Trabajadores art. 38, 30 calendar days) IS in corpus. Gate MUST NOT
+      abstain: expect a standout top-1 (art. 38) and good coverage of "vacaciones". The
+      dangerous false positive if the AND policy is too aggressive.
+
+  - id: legal-bridge-002
+    vertical: legal
+    query: "¿Cuánto permiso me corresponde por el nacimiento de mi hijo?"
+    label: answerable
+    category: first_person_in_corpus_bridge
+    first_person: true
+    expected_behavior: bridge_to_general
+    rationale: >
+      Personal phrasing, but the general statutory rule (permiso por nacimiento, ET) is in
+      corpus. Answerable via the general rule. Expect a clear top-1 and decent coverage.
+
+  - id: legal-plain-001
+    vertical: legal
+    query: "¿Qué establece el Estatuto de los Trabajadores sobre el periodo de prueba?"
+    label: answerable
+    category: plain_answerable_in_corpus
+    first_person: false
+    expected_behavior: answer
+    rationale: >
+      Directly in corpus (ET art. 14). Expect a strong top-1 and high coverage. Positive
+      control: the gate must stay out of the way of clean answerable queries.
+
+  - id: legal-plain-002
+    vertical: legal
+    query: "¿Cuál es la duración máxima de un contrato temporal según la normativa laboral?"
+    label: answerable
+    category: plain_answerable_in_corpus
+    first_person: false
+    expected_behavior: answer
+    rationale: >
+      Answerable from corpus. Expect standout top-1, good coverage. Positive control.
+
+  - id: legal-ood-001
+    vertical: legal
+    query: "¿Qué tiempo hará mañana en Barcelona?"
+    label: not_answerable
+    category: out_of_domain
+    first_person: false
+    expected_behavior: abstain
+    rationale: >
+      Off-domain: retrieval is NOT topically close. Easy control — should already abstain via
+      the relevance gate; here it confirms the answerability gate does not over-fire on
+      obviously-empty retrieval either.
+
+  - id: legal-ood-002
+    vertical: legal
+    query: "¿Cuál es la capital de Australia?"
+    label: not_answerable
+    category: out_of_domain
+    first_person: false
+    expected_behavior: abstain
+    rationale: >
+      Off-domain factual, unrelated to corpus. Retrieval not close. Easy control.
+
+  # ---------------------------------------------------------------------------
+  # HEALTH  (no bridge: first-person applied => abstain)
+  # ---------------------------------------------------------------------------
+
+  - id: health-b2-001
+    vertical: health
+    query: "¿Qué dosis de ibuprofeno debo tomar para mi dolor de espalda?"
+    label: not_answerable
+    category: first_person_applied_no_bridge
+    first_person: true
+    expected_behavior: abstain
+    rationale: >
+      Contrast pair with health-plain-001. General posology exists in the AEMPS ficha tecnica,
+      but the APPLIED question ("for MY back pain") is personalized advice. Health does NOT
+      bridge to the general rule -> abstain. Retrieval is topically close (same drug); gate must
+      distinguish applied-personal from answerable-general on coverage, not topicality.
+
+  - id: health-b2-002
+    vertical: health
+    query: "¿Tengo cáncer si me duele aquí?"
+    label: not_answerable
+    category: b2_first_person_out_of_corpus
+    first_person: true
+    expected_behavior: abstain
+    rationale: >
+      Personal diagnosis, absent from corpus. Retrieval pulls oncology-guideline chunks
+      (topical) with no answer to the personal question. Flat margin, low coverage. B2.
+
+  - id: health-b2-003
+    vertical: health
+    query: "¿Es peligroso para mí mezclar mi medicación con alcohol?"
+    label: not_answerable
+    category: first_person_applied_no_bridge
+    first_person: true
+    expected_behavior: abstain
+    rationale: >
+      Depends on the person's specific medication. Retrieval surfaces interaction/ficha chunks
+      (topical) that cannot answer "for ME". Applied-personal, no bridge -> abstain.
+
+  - id: health-b2-004
+    vertical: health
+    query: "¿Qué medicamento me tomo para lo que tengo?"
+    label: not_answerable
+    category: b2_first_person_out_of_corpus
+    first_person: true
+    expected_behavior: abstain
+    rationale: >
+      No stated condition, no answer in corpus. Retrieval may return generic drug chunks;
+      expect very low coverage of any salient term. Abstain.
+
+  - id: health-plain-001
+    vertical: health
+    query: "¿Cuál es la dosis habitual de paracetamol en adultos?"
+    label: answerable
+    category: plain_answerable_in_corpus
+    first_person: false
+    expected_behavior: answer
+    rationale: >
+      Contrast pair with health-b2-001. General adult posology IS in the AEMPS ficha tecnica.
+      Third-person/general -> answerable. Expect standout top-1 and high coverage. The gate must
+      answer this while abstaining on the applied "what dose for MY pain" — same drug, different
+      answerability. This pair is the health calibration anchor.
+
+  - id: health-plain-002
+    vertical: health
+    query: "¿Qué recomienda la guía de práctica clínica sobre el manejo de la diabetes tipo 2?"
+    label: answerable
+    category: plain_answerable_in_corpus
+    first_person: false
+    expected_behavior: answer
+    rationale: >
+      Directly answerable from a GuiaSalud GPC. Expect strong top-1, good coverage. Positive
+      control.
+
+  - id: health-plain-003
+    vertical: health
+    query: "¿Cuáles son los efectos secundarios del omeprazol según su ficha técnica?"
+    label: answerable
+    category: plain_answerable_in_corpus
+    first_person: false
+    expected_behavior: answer
+    rationale: >
+      Answerable from AEMPS. Expect standout top-1, high coverage. Positive control.
+
+  - id: health-ood-001
+    vertical: health
+    query: "¿Quién ganó la Champions este año?"
+    label: not_answerable
+    category: out_of_domain
+    first_person: false
+    expected_behavior: abstain
+    rationale: >
+      Off-domain: retrieval not close. Easy control confirming the gate does not over-fire on
+      empty retrieval.
