@@ -23,14 +23,19 @@
   --muted: #9ca0ab;
   --faint: #686c77;
   --ok: #46cfa6;
-  --warn: #e6a95c;
-  --warn-tint: rgba(230, 169, 92, 0.13);
-  --warn-line: rgba(230, 169, 92, 0.38);
+  /* Tinted circle for success dialogs/toasts — same 0.13 alpha recipe as
+     warn-tint/accent-tint, derived from --ok. */
+  --ok-tint: rgba(70, 207, 166, 0.13);
+  /* warn/danger hex per the dialog-system design hand-off (supersedes the
+     first-generation values #E6A95C/#E5484D; tint/line keep their alphas). */
+  --warn: #e0b15e;
+  --warn-tint: rgba(224, 177, 94, 0.13);
+  --warn-line: rgba(224, 177, 94, 0.38);
   /* Quit/destructive action (QuitButton, QuitDialog). Outside the accent
      quartet on purpose: danger never swaps per vertical. */
-  --danger: #e5484d;
-  --danger-tint: rgba(229, 72, 77, 0.1);
-  --danger-line: rgba(229, 72, 77, 0.35);
+  --danger: #e06b6b;
+  --danger-tint: rgba(224, 107, 107, 0.1);
+  --danger-line: rgba(224, 107, 107, 0.35);
   --accent: #7c9cff;
   --accent-on: #0c0d10;
   --accent-tint: rgba(124, 156, 255, 0.13);

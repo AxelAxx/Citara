@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ChatLoading } from './components/ChatLoading'
+import { DialogProvider } from './components/DialogProvider'
 import { Splash } from './components/Splash'
 import { Chat } from './screens/Chat'
 import { Welcome } from './screens/Welcome'
@@ -71,7 +72,7 @@ function WarmUpGate({
 // while the splash animation covers the fetch. The Welcome mounts only when
 // BOTH finish — total wait is max(animation, fetch), never their sum — and so
 // it never renders a loading state.
-function App() {
+function AppContent() {
   const [splashAnimationDone, setSplashAnimationDone] = useState(false)
   const [view, setView] = useState<View>({ screen: 'welcome' })
   const {
@@ -119,6 +120,17 @@ function App() {
         setView({ screen: 'loading', verticalId })
       }}
     />
+  )
+}
+
+// The provider wraps EVERY screen (not just Chat): dialogs and toasts must be
+// invocable from any point of the flow — the app-wide seam the read-only
+// diagnostic identified as missing.
+function App() {
+  return (
+    <DialogProvider>
+      <AppContent />
+    </DialogProvider>
   )
 }
 
