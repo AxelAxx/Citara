@@ -86,6 +86,13 @@ class Chunk(BaseModel):
     # value object: never persisted from here, and None everywhere outside the
     # retrieval path (ingest-side Chunks don't carry it).
     embedding: Embedding | None = None
+    # Transient retrieval payload, same pattern as ``embedding``: the query↔chunk
+    # similarity distance Chroma reported for THIS retrieval (lower = closer),
+    # populated by the Retriever from the QueryHit so the AnswerabilityGate can
+    # measure the top-1 margin against the tail without re-querying. NOT part of
+    # the canonical value object: never persisted from here, and None everywhere
+    # outside the retrieval path (ingest-side Chunks don't carry it).
+    distance: float | None = None
 
 
 class Query(BaseModel):

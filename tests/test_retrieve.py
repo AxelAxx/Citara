@@ -231,6 +231,30 @@ def test_hit_without_distance_is_dropped():
     assert [c.text for c in context] == ["con distancia"]
 
 
+# --- transient distance rides onto the Chunk (AnswerabilityGate prerequisite) -
+
+
+def test_to_chunk_propagates_distance_from_the_hit():
+    # The distance is a per-retrieval fact, so it must survive the QueryHit →
+    # Chunk boundary: the AnswerabilityGate measures the top-1 margin from the
+    # resolved context, and recomputing distances there would need a second
+    # embed call.
+    chunk = Retriever._to_chunk(_hit("doc-a", 1, "texto", distance=0.42))
+
+    assert chunk.distance == 0.42
+
+
+def test_chunk_without_distance_still_validates():
+    # Backcompat: distance is transient like ``embedding`` — every Chunk built
+    # outside the retrieval path (ingest side, tests) keeps constructing
+    # without it.
+    chunk = Chunk(
+        text="texto", metadata=rebuild_metadata({"document_id": "doc", "page": 1})
+    )
+
+    assert chunk.distance is None
+
+
 # --- rebuild_metadata is the exact mirror of flatten_metadata ----------------
 
 
