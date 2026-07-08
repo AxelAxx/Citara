@@ -41,6 +41,18 @@ export interface ApiErrorBody {
   message: string
 }
 
+// Backend failures the user can plausibly fix and retry (start Ollama, pull
+// the model, ingest the corpus) — the contract's 503/409 family. Belongs here
+// because it IS contract knowledge (api/errors.py's mapping table), not UI
+// policy: the dialog layer decides HOW to surface them, this set decides WHICH
+// codes are recoverable. `message` arrives actionable verbatim from core.
+export const RECOVERABLE_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ollama_unreachable',
+  'model_not_pulled',
+  'retrieval_failed',
+  'empty_corpus',
+])
+
 export type Health =
   | {
       ok: true

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { streamQuery } from '../api/client'
-import type { AnswerPart, Citation } from '../api/client'
+import { RECOVERABLE_ERROR_CODES, streamQuery } from '../api/client'
+import type { AnswerPart, Citation, ErrorEvent } from '../api/client'
+import { useDialog } from '../components/DialogProvider'
 
 /**
  * Assistant lifecycle: 'thinking' from send until the first token (retrieval
@@ -65,6 +66,10 @@ function emptyAssistant(): Message {
 export function useChat(verticalId: string): UseChatResult {
   const [messages, setMessages] = useState<Message[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
+  // App-wide dialog seam: surfaces recoverable backend failures (Ollama down,
+  // model not pulled…) as the amber retry dialog. Requires DialogProvider
+  // above (App.tsx) — useDialog fails loudly otherwise.
+  const dialog = useDialog()
   // The in-flight stream's controller — null when nothing is streaming.
   const abortRef = useRef<AbortController | null>(null)
   // Monotonic thread id, bumped on every vertical switch. A send belongs to
@@ -129,6 +134,33 @@ export function useChat(verticalId: string): UseChatResult {
       if (anchoringTimer !== undefined) clearTimeout(anchoringTimer)
       anchoringTimer = undefined
     }
+    // Amber recoverable-failure dialog (design #4). ONE semantics for the two
+    // error mouths of the query path: pre-stream JSON errors and the
+    // mid-stream SSE error event both funnel through onError (client.ts), so
+    // hooking here covers both. The body is core's actionable message
+    // VERBATIM — never rewritten. Additive to the passive surfaces: the
+    // sidebar OllamaBadge and the WarmUpGate error card keep reporting the
+    // idle/startup state; this dialog only fires for the query that actively
+    // failed. Fire-and-forget: the in-chat error message (patchLast above)
+    // stays regardless of the user's dialog choice.
+    const offerRetry = (event: ErrorEvent) => {
+      if (!RECOVERABLE_ERROR_CODES.has(event.error_code)) return
+      void dialog
+        .confirm({
+          sem: 'warn',
+          icon: 'warn',
+          title: 'No se pudo completar la consulta',
+          body: event.message,
+          primaryLabel: 'Reintentar',
+          secondaryLabel: 'Cerrar',
+        })
+        .then((retry) => {
+          // Thread guard, same rule as the abort path: a vertical switch
+          // while the dialog sat open moved the conversation — re-asking
+          // there would cross corpora.
+          if (retry && threadRef.current === thread) void send(query)
+        })
+    }
     try {
       await streamQuery(verticalId, query, {
         // Early, provisional flag; DoneEvent below is authoritative. Phase
@@ -178,6 +210,7 @@ export function useChat(verticalId: string): UseChatResult {
             phase: 'error',
             error: event.message,
           }))
+          offerRetry(event)
         },
       }, controller.signal)
     } catch (err) {
