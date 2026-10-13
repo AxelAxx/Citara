@@ -9,6 +9,7 @@ no telemetry.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](./LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)
+[![CI](https://github.com/AxelAxx/Citara/actions/workflows/ci.yml/badge.svg)](https://github.com/AxelAxx/Citara/actions/workflows/ci.yml)
 ![Tests](https://img.shields.io/badge/tests-137%20passing-brightgreen.svg)
 ![Status](https://img.shields.io/badge/status-v0.4%20%C2%B7%20frozen-lightgrey.svg)
 
@@ -16,8 +17,10 @@ no telemetry.
 > tool. Public documents only; no personal or patient data.
 
 <p align="center">
-  <img src="docs/screenshots/01-welcome.png" alt="Citara welcome screen: pick a vertical" width="820">
+  <img src="docs/screenshots/demo.gif" alt="Demo: pick the legal vertical, ask about annual leave, get a cited answer, then an out-of-corpus question is refused" width="820">
 </p>
+
+<p align="center"><sub>Sped up 2.5x. A real answer takes one to two minutes on the RTX 1080 used for development.</sub></p>
 
 <p align="center">
   <img src="docs/screenshots/03-legal-answer-citations.png" alt="Grounded answer with inline citation chips and the sources panel" width="820">
@@ -108,8 +111,8 @@ run fully on the GPU.
 
 ## Quickstart
 
-Prerequisites: [Ollama](https://ollama.com), Python 3.11+, Node 20+, and a GPU with roughly
-8 GB of VRAM (CPU works, slowly).
+Prerequisites: [Ollama](https://ollama.com), Python 3.11+ (developed on 3.14, CI runs 3.11 and
+3.12), Node 20+, and a GPU with roughly 8 GB of VRAM (CPU works, slowly).
 
 ```bash
 # 1. models (one-time, ~6 GB)
@@ -157,14 +160,18 @@ cd frontend && npm run dev            # frontend at http://localhost:5173
 Open http://localhost:5173, pick a vertical, and ask in Spanish. The first question after
 start-up waits for the model warm-up behind the splash screen.
 
-**Tests and checks.**
+**Tests and checks.** Same steps CI runs (`.github/workflows/ci.yml`); nothing needs Ollama.
 
 ```bash
-pytest -q                              # 137 passed, fully mocked
+pip install -r requirements-dev.txt    # pytest, ruff, httpx (+ playwright for captures)
 ```
 
 ```bash
-cd frontend && npm run build && npm run lint
+ruff check . && ruff format --check . && pytest -q    # 137 passed, fully mocked
+```
+
+```bash
+cd frontend && npm run lint && npm run build
 ```
 
 ## Repository layout
@@ -172,14 +179,17 @@ cd frontend && npm run build && npm run lint
 ```
 core/        framework-free engine: models, ingest, embed, store, retrieve, generate, engine
 api/         FastAPI adapter over the RagEngine façade (SSE streaming)
-frontend/    React SPA (Vite + Tailwind)
+frontend/    React SPA (Vite + Tailwind); src/lib holds the pure helpers, src/hooks the state
 config/      one VerticalConfig YAML per vertical (legal, health)
 data/        corpora (PDFs, git-ignored)
 tests/       pytest suite with mocked Embedder / Generator / store
 docs/        SPEC, glossary, API contract, decisions, audit, B2 measurement set
 scripts/     read-only diagnostics and measurement harnesses
-app.py, ui/  legacy Streamlit presentation, frozen and unmaintained
+app.py, ui/  legacy Streamlit presentation, frozen and unmaintained (requirements-legacy.txt)
 ```
+
+Tooling: `pyproject.toml` (ruff + pytest config), pinned `requirements*.txt`, GitHub Actions CI.
+Release history in [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Known limitations
 
