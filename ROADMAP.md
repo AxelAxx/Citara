@@ -5,6 +5,11 @@
 > descrito se implementa hasta que su versión arranque. Cada versión traza a los
 > FR/AC/§8 de [`docs/SPEC.md`](./docs/SPEC.md) donde aplica.
 
+> **Cierre (2026-10-13).** El proyecto queda **congelado en v0.4** como pieza de
+> portfolio. V2 se resolvió de otra forma a la prevista aquí (migración a React +
+> FastAPI sin tocar `core/`, en vez de modularizar Streamlit). V3, V4 y V5 **no se
+> construyen**: se conservan como visión documentada, no como trabajo pendiente.
+
 ---
 
 ## V1 — MVP de portfolio (la versión de la entrevista / Walk) — **CONGELADA**

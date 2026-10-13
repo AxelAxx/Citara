@@ -3,6 +3,10 @@
 Operating guide for Claude Code in this repository. Read this, [`docs/SPEC.md`](./docs/SPEC.md),
 and [`docs/UBIQUITOUS_LANGUAGE.md`](./docs/UBIQUITOUS_LANGUAGE.md) before writing code.
 
+> **Project status: closed and frozen at v0.4 (2026-10-13).** Portfolio showcase. No new
+> features; the app answers over the two already-ingested corpora. Changes are limited to
+> docs, bug fixes that keep behaviour identical, and keeping the test suite green.
+
 ## What this project is
 
 `rag-engine`: a vertical-agnostic, **local, free** RAG ("chat with your documents") engine that
@@ -54,8 +58,12 @@ Portfolio MVP, ~4 days. The whole point is reuse: **one `RagEngine`, many Vertic
 | 5 | `core/retrieve.py` | `Retriever` | FR6 |
 | 6 | `core/generate.py` | `Generator` (prompt + Qwen2.5) | FR7–FR9 |
 | 7 | `core/engine.py` | `RagEngine` wiring from `VerticalConfig` | G1, FR10 |
-| 8 | `app.py` | Streamlit `App` + `SourcesPanel` | FR11 |
-| 9 | `config/*.yaml` | `VerticalConfig` per Vertical | FR10 |
+| 8 | `api/` | FastAPI adapter over the `RagEngine` façade (SSE streaming); see `docs/API_CONTRACT.md` | FR11 |
+| 9 | `frontend/` | React + Vite SPA (`SourcesPanel`, inline `CiteChip`s) | FR11 |
+| 10 | `config/*.yaml` | `VerticalConfig` per Vertical | FR10 |
+
+`app.py` + `ui/` are the original Streamlit presentation: frozen, unmaintained, kept as the proof that
+the migration cost zero changes in `core/`. Do not extend them.
 
 Build inner→outer. A module is done when its acceptance criteria (SPEC §7) hold.
 
@@ -81,8 +89,9 @@ ollama ps                                 # verify GPU offload
 python -m core.ingest --vertical health
 python -m core.ingest --vertical legal
 
-# run the app
-streamlit run app.py
+# run the app (two terminals, Ollama must be up)
+uvicorn api.main:app --port 8000            # backend
+cd frontend && npm run dev                  # frontend at http://localhost:5173
 
 # tests
 pytest -q

@@ -4,7 +4,31 @@
 > y siguientes pasos. Se actualiza al cerrar cada hito. Alimenta luego `DECISIONS.md`
 > y el `README.md`.
 
-Última actualización: 2026-07-01
+Última actualización: 2026-10-13
+
+---
+
+## Cierre del proyecto (2026-10-13) — v0.4, congelado
+
+El proyecto se cierra en el estado actual como pieza de portfolio. No se añaden
+features: la app responde sobre los dos corpus ya ingestados (legal/BOE y
+health/GuíaSalud) y punto. Lo que se hizo en el cierre:
+
+- **README reescrito** para un lector externo (qué demuestra, cómo funciona, quickstart
+  reproducible, limitaciones conocidas) con capturas reales en `docs/screenshots/`.
+- **Licencia AGPL-3.0 aplicada** (`LICENSE`), tal y como decidió D-06.
+- `docs/DECISIONS_merged.md` renombrado a `docs/DECISIONS.md` (los enlaces de SPEC/README
+  apuntaban al nombre que no existía).
+- `frontend/README.md` sustituido (era la plantilla de Vite).
+- `CLAUDE.md` y `ROADMAP.md` marcados como congelados.
+
+Estado verificado en el cierre: `pytest -q` → **137 passed**; `npm run build` y
+`npm run lint` limpios (5 warnings preexistentes de fast-refresh); smoke en vivo contra
+Ollama en ambas verticales (respuesta con chips + panel, abstención exacta fuera de corpus).
+
+Qué queda fuera, a propósito (documentado en el README y en `docs/audit/06-readiness.md`):
+chunks-cabecera en el corpus health, el residual B2 en health, versiones flotantes en
+`requirements.txt`, y toda la hoja de ruta V2–V5 del `ROADMAP.md`.
 
 ---
 
@@ -163,8 +187,8 @@ Vertical `legal` (BOE) ya integrada (G1 demostrable). Foco actual: pulido de UX
 - [x] AC1 — ingesta persiste + idempotente — **validado en vivo sobre corpus health real**
 - [x] AC2 — respuesta con ≥1 cita correcta (doc + página) — **validado en vivo (Qwen cita guías reales en español)**
 - [x] AC3 — abstención ante pregunta fuera de corpus — **validado en vivo**
-- [ ] AC4 — cambio de vertical sin diff en `core/` — legal.yaml integrado; **pendiente validar el switch en vivo**
+- [x] AC4 — cambio de vertical sin diff en `core/` — **validado en vivo** (smoke legal + health contra la misma API, `docs/audit/06-readiness.md`)
 - [x] AC5 — modo avión: sin llamadas externas — **validado en vivo (2026-07-01)**
-- [x] AC6 — pytest verde (Chunker, Citation, Retriever con mocks) — **69 tests**
+- [x] AC6 — pytest verde (Chunker, Citation, Retriever con mocks) — **137 tests** al cierre
 - [x] AC7 — errores accionables (Ollama down / modelo sin pull / corpus vacío) — verificado en vivo
-- [ ] AC8 — README reproducible + GIF + diagrama
+- [x] AC8 — README reproducible + diagrama + capturas reales (`docs/screenshots/`; capturas en lugar de GIF)

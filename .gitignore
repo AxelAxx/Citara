@@ -57,6 +57,7 @@ frontend/.vite/
 
 # --- Claude Code (commit shared config, ignore local-only settings) ---
 .claude/settings.local.json
+.claude/launch.json
 
 # --- IDE / editor ---
 .idea/
