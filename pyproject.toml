@@ -1,0 +1,47 @@
+[project]
+name = "citara"
+version = "0.4.0"
+description = "Local, private, cited RAG over Spanish public documents (legal + health demos)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+
+# Dependencies are managed with requirements*.txt (pinned) on purpose: the project is a
+# runnable application, not a distributable package, and the pinned files are what the
+# README and CI install. This table exists so tools (ruff, pytest) find their config.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["."]
+extend-exclude = ["frontend", "export", "chroma_db", "data", ".venv"]
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I isort, UP pyupgrade, B bugbear, SIM simplify.
+select = ["E", "W", "F", "I", "UP", "B", "SIM"]
+ignore = [
+  # Vertical is `class Vertical(str, Enum)` on purpose: StrEnum changes str()/format()
+  # semantics and the YAML loader relies on the current behaviour.
+  "UP042",
+  # zip(strict=...) would turn a silent length mismatch into a raise; behaviour is frozen.
+  "B905",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Legacy Streamlit presentation: frozen and unmaintained. It is formatted like the rest
+# but not held to line-length/simplification rules (long CSS strings in ui/theme.py).
+"app.py" = ["E501", "SIM"]
+"ui/**" = ["E501", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "api", "ui", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+# Ruff also formats fenced Python in Markdown; the docs' snippets are illustrative and
+# hand-aligned, so leave them alone.
+exclude = ["*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

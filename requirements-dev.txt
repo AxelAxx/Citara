@@ -1,8 +1,12 @@
-# Dev-only tooling — NOT runtime dependencies of the app.
-# The app (app.py, core/) never imports anything from here; keep it out of
-# requirements.txt so a normal install stays lean. Install with:
-#   uv pip install -r requirements-dev.txt      # (or: pip install -r requirements-dev.txt)
+# Dev-only tooling. Never imported by the app; keep it out of requirements.txt.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
 
-playwright>=1.61        # real-browser UI verification (headless Chromium) for the Citara restyle
-# After installing playwright, download the browser binary once (not a pip package):
+pytest==9.1.1
+httpx==0.28.1        # FastAPI TestClient transport (tests/test_api_*.py)
+ruff==0.17.0         # lint + format; config in pyproject.toml
+
+# Real-browser UI capture (README screenshots / demo video). After installing, download
+# the browser binary once (it is not a pip package):
 #   python -m playwright install chromium
+playwright==1.61.0

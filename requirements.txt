@@ -1,22 +1,21 @@
-# Core RAG stack — all local, all free.
-langchain>=0.3
-langchain-community>=0.3
-langchain-ollama>=0.2          # OllamaEmbeddings adapter (Embedder port, core/embed.py)
-langchain-text-splitters>=0.3
-requests>=2.31                 # Ollama preflight: GET /api/tags (reachability + model-pulled check)
-tiktoken>=0.7           # token-based length_function for the Chunker (chunk_size in tokens, not chars)
-chromadb>=0.5
-ollama>=0.3
-pymupdf4llm>=0.0.17      # AGPL-3.0 — see DECISIONS.md before commercial use
-pyyaml>=6.0
+# Runtime dependencies of the live app (core/ + api/). Pinned to the versions the
+# project was developed and verified with (Python 3.11+). Everything is local and free.
+#
+#   pip install -r requirements.txt
+#
+# Dev/test tooling lives in requirements-dev.txt; the frozen Streamlit presentation in
+# requirements-legacy.txt.
 
-# Presentation
-streamlit>=1.40
+# --- core/ (engine) ---
+requests==2.34.2                 # Ollama HTTP adapters: /api/embed, /api/chat, /api/tags preflight
+chromadb==1.5.9                  # VectorStore adapter (persistent, one Collection per vertical)
+pymupdf4llm==1.28.0              # PDF -> markdown loader. AGPL-3.0: see docs/DECISIONS.md
+langchain-text-splitters==0.3.11 # RecursiveCharacterTextSplitter behind the Chunker
+tiktoken==0.13.0                 # token-based length_function (chunk_size is in tokens, not chars)
+pyyaml==6.0.3                    # config/<vertical>.yaml -> VerticalConfig
+pydantic==2.13.4                 # frozen value objects (Chunk, Answer, Citation, VerticalConfig)
 
-# Presentation — HTTP API (FastAPI+React migration; Streamlit stays as the safety net)
-fastapi>=0.115
-uvicorn[standard]>=0.30
-sse-starlette>=2.1
-
-# Dev / tests
-pytest>=8.0
+# --- api/ (HTTP presentation) ---
+fastapi==0.139.0
+uvicorn[standard]==0.49.0
+sse-starlette==3.4.5             # /query streams Server-Sent Events

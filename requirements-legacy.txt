@@ -1,0 +1,8 @@
+# Legacy Streamlit presentation (app.py + ui/). Frozen and unmaintained: it is kept only as
+# the proof that the React/FastAPI migration cost zero changes in core/. Not needed to run
+# the live app.
+#
+#   pip install -r requirements.txt -r requirements-legacy.txt
+#   streamlit run app.py
+
+streamlit==1.58.0
