@@ -1,38 +1,13 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ConfirmDialog, ICON, SEM } from './ConfirmDialog'
-import type { DialogIcon, DialogSem } from './ConfirmDialog'
+import { ConfirmDialog } from './ConfirmDialog'
+import { DialogContext } from './dialogContext'
+import type { ConfirmOptions, DialogApi, ToastOptions } from './dialogContext'
+import { ICON, SEM } from './dialogSemantics'
+import type { DialogIcon, DialogSem } from './dialogSemantics'
 
-export interface ConfirmOptions {
-  sem: DialogSem
-  icon: DialogIcon
-  title: string
-  body: string
-  primaryLabel: string
-  secondaryLabel?: string
-}
-
-export interface ToastOptions {
-  message: string
-  /** Defaults to 'success' (check icon) — the design's light-feedback case. */
-  sem?: DialogSem
-  action?: { label: string; onClick: () => void }
-}
-
-export interface DialogApi {
-  /** Resolves true on the primary verb, false on secondary/Esc/backdrop. */
-  confirm(options: ConfirmOptions): Promise<boolean>
-  /** Ephemeral, non-blocking notice; auto-dismisses (~3.2s). */
-  toast(options: ToastOptions): void
-}
+// Re-exported so callers keep a single import path for the dialog API types.
+export type { ConfirmOptions, DialogApi, ToastOptions } from './dialogContext'
 
 // Auto-dismiss window: long enough to read one sentence, short enough to
 // never feel like UI the user must manage (design #7: non-blocking).
@@ -46,8 +21,6 @@ const TOAST_ICON: Record<DialogSem, DialogIcon> = {
   danger: 'warn',
   accent: 'refresh',
 }
-
-const DialogContext = createContext<DialogApi | null>(null)
 
 /**
  * The app-wide dialog seam the diagnostic identified as missing: state is
@@ -170,14 +143,4 @@ declare global {
     /** Dev-only QA seam set by DialogProvider; absent in production builds. */
     __citaraDialog?: DialogApi
   }
-}
-
-export function useDialog(): DialogApi {
-  const api = useContext(DialogContext)
-  if (api === null) {
-    // Fail fast and loud (house rule 5): a silent no-op dialog would swallow
-    // confirmations of destructive actions.
-    throw new Error('useDialog() requires a <DialogProvider> above (App.tsx).')
-  }
-  return api
 }

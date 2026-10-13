@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { RECOVERABLE_ERROR_CODES, streamQuery } from '../api/client'
 import type { AnswerPart, Citation, ErrorEvent } from '../api/client'
-import { useDialog } from '../components/DialogProvider'
+import { useDialog } from './useDialog'
 
 /**
  * Assistant lifecycle: 'thinking' from send until the first token (retrieval

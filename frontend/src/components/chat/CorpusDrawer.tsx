@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { formatThousands } from '../Sidebar/CorpusBlock'
+import { formatThousands } from '../../lib/format'
 
 export interface CorpusDrawerProps {
   open: boolean

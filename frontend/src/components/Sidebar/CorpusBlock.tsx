@@ -1,3 +1,5 @@
+import { formatThousands } from '../../lib/format'
+
 /** Presentational corpus status section (label + card, mock Citara-Empty-Chat). */
 export interface CorpusBlockProps {
   ready: boolean
@@ -5,14 +7,6 @@ export interface CorpusBlockProps {
   chunkCount: number
   /** Opens the CorpusDrawer — state lives in Chat.tsx, not here. */
   onManage: () => void
-}
-
-// Spanish typographic thousands: "3 407" with a non-breaking space, so the
-// mono stat line never wraps mid-number.
-// Exported: the CorpusDrawer renders the same stat line and must format
-// identically.
-export function formatThousands(n: number): string {
-  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
 }
 
 export function CorpusBlock({
