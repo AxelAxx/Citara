@@ -275,4 +275,4 @@ verificador solo deciden QUÉ chips existen y a qué citation apuntan (`_parts_f
 reproduce el texto byte a byte, `generate.py:309-352`). La abstención se decide por ESTADO
 resuelto, nunca por matching de prosa cruda (`query.py:86-107`); el verificador es "the LLM
 proposes, the deterministic guard disposes" (`verify_anchors`, `generate.py:213-306`, umbrales
-calibrados en `config/*.yaml` y registrados en `DECISIONS_merged.md`).
+calibrados en `config/*.yaml` y registrados en `DECISIONS.md`).

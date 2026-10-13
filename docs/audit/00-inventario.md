@@ -15,7 +15,7 @@
 | `config/` | `legal.yaml` / `health.yaml`: la única sede de diferencias entre verticales (VerticalConfig). |
 | `data/` | Corpus reales: 10 PDFs BOE (legal) + 10 guías GuíaSalud (health). |
 | `tests/` | 9 ficheros pytest (123 tests, todo mockeado — sin Ollama vivo). |
-| `docs/` | `SPEC.md`, `API_CONTRACT.md`, `UBIQUITOUS_LANGUAGE.md`, `DECISIONS_merged.md`, `KNOWN_LIMITATION_B2_*.md`. |
+| `docs/` | `SPEC.md`, `API_CONTRACT.md`, `UBIQUITOUS_LANGUAGE.md`, `DECISIONS.md`, `KNOWN_LIMITATION_B2_*.md`. |
 | `export/` | Mocks HTML/CSS del diseño (hand-off), fuente de los tokens de Tailwind. |
 | Raíz | `CLAUDE.md`, `README.md`, `PROGRESS.md`, `ROADMAP.md`, `requirements*.txt`. |
 

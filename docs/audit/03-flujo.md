@@ -83,7 +83,7 @@ relevant = [
 2. Tres ramas, en orden de precedencia (`:293-306`): **discard** si ni el argmax llega a `anchor_support_floor` (0.50 — nada respalda la frase, chip fuera); **repair** si el argmax supera al anclado por más de `anchor_repair_margin` (0.05 — remapea al mejor chunk del argmax); **keep** en empates (ambigüedad legítima de páginas adyacentes, medida en 0.005-0.03).
 3. Degradaciones aditivas: sin embedder cableado, chunk sin vector, o fallo transitorio de embed → anclas del modelo intactas (`:262-268,275-283`).
 
-Regla relativa y no umbral absoluto **por medición**: las anclas falsas conocidas puntuaban DENTRO del rango de las correctas (0.61-0.73 vs 0.59-0.80); lo que separa es el margen al argmax. Calibración registrada en `DECISIONS_merged.md` (n=40 + smoke en vivo). ¿Qué pasa si un ancla no verifica? — o se repara al chunk correcto (caso índice→p.62, reproducido en vivo), o se descarta su chip; la prosa nunca se toca.
+Regla relativa y no umbral absoluto **por medición**: las anclas falsas conocidas puntuaban DENTRO del rango de las correctas (0.61-0.73 vs 0.59-0.80); lo que separa es el margen al argmax. Calibración registrada en `DECISIONS.md` (n=40 + smoke en vivo). ¿Qué pasa si un ancla no verifica? — o se repara al chunk correcto (caso índice→p.62, reproducido en vivo), o se descarta su chip; la prosa nunca se toca.
 
 **Ensamblado** (`_parts_from_anchors :309-352`): frases → TextParts; tras cada frase anclada, un CitePart por citation DISTINTA (`n` ya remapeado por el dedup `_fragment_index_to_citation_index :724-743`, 1-based sobre `citations`); TextParts adyacentes se fusionan; la concatenación de TextParts reproduce el texto final byte a byte.
 

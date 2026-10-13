@@ -128,5 +128,5 @@ since the trigger is narrow (see Scope).
 
 **Legal: solved (`d96917c`, `AnswerabilityGate`, verified in vivo). Health applied-general residual: tracked, not built — by design.** Legal separates cleanly on S1 (μ=0.075); health does **not** (`SPEC_B2_v2.md` §2.1: `health-b2-001` has the highest margin in the vertical yet is not_answerable — a personal-framing/policy problem, not a retrieval-sufficiency one), so the gate is deliberately OFF there and the residual routes to Stage 1 NLI, built only if measured necessary.
 Does not block the MVP; it is an edge case requiring all three conditions at once. First
-recorded in `DECISIONS_merged.md` (commit `bdc1f17`); this document is the detailed
+recorded in `DECISIONS.md` (commit `bdc1f17`); this document is the detailed
 reference.
