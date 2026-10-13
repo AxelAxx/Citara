@@ -30,7 +30,7 @@ def corpus_stats_for(vertical_value: str) -> CorpusStats:
 
 
 def document_count_label(config: VerticalConfig, stats: CorpusStats) -> str:
-    """"{domain_sublabel} · {n} documento(s)" — the ONE format welcome and sidebar share.
+    """ "{domain_sublabel} · {n} documento(s)" — the ONE format welcome and sidebar share.
 
     The count is the REAL one from CorpusStats (the mock's "14 documentos" was a
     placeholder); an empty sublabel degrades to the bare count (fail-safe).

@@ -20,7 +20,6 @@ from core.models import (
     Chunk,
     ChunkMetadata,
     Citation,
-    CitePart,
     Query,
     TextPart,
     Vertical,
@@ -134,9 +133,7 @@ def test_answer_retrieves_with_config_top_k_and_returns_generator_answer():
     retriever = _FakeRetriever(context)
     expected = _answer_with_citation()
     generator = _FakeGenerator(expected)
-    engine = RagEngine(
-        retriever=retriever, generator=generator, top_k=7, relevance_threshold=1.23
-    )
+    engine = RagEngine(retriever=retriever, generator=generator, top_k=7, relevance_threshold=1.23)
 
     result = engine.answer(Query(text="¿plazo?"))
 
@@ -151,7 +148,12 @@ def test_answer_retrieves_with_config_top_k_and_returns_generator_answer():
 
 def test_where_is_forwarded_to_retrieval():
     retriever = _FakeRetriever([Chunk(text="t", metadata=ChunkMetadata(document_id="d", page=1))])
-    engine = RagEngine(retriever=retriever, generator=_FakeGenerator(_answer_with_citation()), top_k=5, relevance_threshold=1.0)
+    engine = RagEngine(
+        retriever=retriever,
+        generator=_FakeGenerator(_answer_with_citation()),
+        top_k=5,
+        relevance_threshold=1.0,
+    )
 
     where = {"document_id": "doc"}
     engine.answer("¿algo?", where=where)
@@ -197,7 +199,9 @@ def test_check_health_delegates_to_embedder_and_generator():
 
 def test_check_health_without_embedder_still_checks_generator():
     generator = _FakeGenerator(_answer_with_citation())
-    engine = RagEngine(retriever=_FakeRetriever([]), generator=generator, top_k=5, relevance_threshold=1.0)
+    engine = RagEngine(
+        retriever=_FakeRetriever([]), generator=generator, top_k=5, relevance_threshold=1.0
+    )
 
     engine.check_health()  # no embedder injected; must not raise
 
@@ -256,9 +260,7 @@ def test_answer_stream_returns_text_stream_and_citations():
         fragments=["El plazo ", "es de ", "un mes."],
         citations=citations,
     )
-    engine = RagEngine(
-        retriever=retriever, generator=generator, top_k=6, relevance_threshold=1.0
-    )
+    engine = RagEngine(retriever=retriever, generator=generator, top_k=6, relevance_threshold=1.0)
 
     streamed = engine.answer_stream(Query(text="¿plazo?"))
 
@@ -385,8 +387,10 @@ def test_corpus_stats_delegates_with_the_configured_embedding_model():
         def corpus_stats(self, embedding_model: str) -> CorpusStats:
             self.calls.append(embedding_model)
             return CorpusStats(
-                document_count=0, chunk_count=0,
-                embedding_model=embedding_model, document_ids=[],
+                document_count=0,
+                chunk_count=0,
+                embedding_model=embedding_model,
+                document_ids=[],
             )
 
     class _NamedEmbedder(_FakeEmbedder):
@@ -423,8 +427,10 @@ def test_corpus_stats_for_builds_only_the_vector_store(monkeypatch):
         def corpus_stats(self, embedding_model: str) -> CorpusStats:
             built["embedding_model"] = embedding_model
             return CorpusStats(
-                document_count=0, chunk_count=0,
-                embedding_model=embedding_model, document_ids=[],
+                document_count=0,
+                chunk_count=0,
+                embedding_model=embedding_model,
+                document_ids=[],
             )
 
     monkeypatch.setattr(engine_module, "VectorStore", _RecordingStore)

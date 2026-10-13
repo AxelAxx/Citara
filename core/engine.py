@@ -135,7 +135,7 @@ class RagEngine:
     # --- factories (the composition root) ------------------------------------
 
     @classmethod
-    def from_vertical_config(cls, config: VerticalConfig) -> "RagEngine":
+    def from_vertical_config(cls, config: VerticalConfig) -> RagEngine:
         """Wire all adapters from one VerticalConfig — the single instantiation site.
 
         Every concrete dependency is built here and injected; the embedding model
@@ -182,7 +182,7 @@ class RagEngine:
         )
 
     @classmethod
-    def from_vertical(cls, vertical: Vertical) -> "RagEngine":
+    def from_vertical(cls, vertical: Vertical) -> RagEngine:
         """Load the Vertical's YAML config, then wire the engine from it.
 
         YAML loading is shared with ``ingest.py``'s ``load_vertical_config`` so
@@ -215,9 +215,7 @@ class RagEngine:
         )
         return self._generator.generate(query, context)
 
-    def answer_stream(
-        self, query: Query | str, *, where: dict | None = None
-    ) -> StreamedAnswer:
+    def answer_stream(self, query: Query | str, *, where: dict | None = None) -> StreamedAnswer:
         """Streaming twin of :meth:`answer` — same orchestration, incremental text.
 
         Streaming is *orchestration*, not presentation: it is still retrieve-then-
@@ -252,9 +250,7 @@ class RagEngine:
             # Bound to THIS retrieval's context so the streaming consumer can
             # resolve the final anchored parts at close without ever holding a
             # RetrievedContext itself (Presentation stays decoupled).
-            resolve_parts=lambda full_text: self._generator.parts_for_text(
-                full_text, context
-            ),
+            resolve_parts=lambda full_text: self._generator.parts_for_text(full_text, context),
         )
 
     def warm_up(self) -> None:
@@ -298,9 +294,7 @@ class RagEngine:
                 "corpus_stats() requires an engine wired with a VectorStore and "
                 "an Embedder. Build it via RagEngine.from_vertical_config()."
             )
-        return self._vector_store.corpus_stats(
-            embedding_model=self._embedder.model_name
-        )
+        return self._vector_store.corpus_stats(embedding_model=self._embedder.model_name)
 
     @classmethod
     def corpus_stats_for(cls, config: VerticalConfig) -> CorpusStats:

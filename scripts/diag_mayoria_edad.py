@@ -50,10 +50,12 @@ def main() -> None:
     # Same construction path RagEngine.from_vertical_config uses: config -> the
     # one embedding model name -> Embedder; config.collection_name -> store.
     config = load_vertical_config(Vertical.LEGAL)
-    print(f"config: vertical={config.vertical.value!r} "
-          f"collection={config.collection_name!r} "
-          f"embedding_model={config.embedding_model!r} "
-          f"top_k={config.top_k} relevance_threshold={config.relevance_threshold}")
+    print(
+        f"config: vertical={config.vertical.value!r} "
+        f"collection={config.collection_name!r} "
+        f"embedding_model={config.embedding_model!r} "
+        f"top_k={config.top_k} relevance_threshold={config.relevance_threshold}"
+    )
 
     embedder = OllamaEmbedder(
         model_name=config.embedding_model,
@@ -81,11 +83,11 @@ def main() -> None:
     metadatas = raw["metadatas"][0]
     distances = raw["distances"][0]
 
-    rows = sorted(
-        zip(ids, documents, metadatas, distances), key=lambda row: row[3]
+    rows = sorted(zip(ids, documents, metadatas, distances), key=lambda row: row[3])
+    header = (
+        f"{'':4}{'rank':>4} | {'distance':>8} | {'gate<=1.05':>10} | "
+        f"{'document_id':<20} | {'page':>4} | snippet"
     )
-    header = (f"{'':4}{'rank':>4} | {'distance':>8} | {'gate<=1.05':>10} | "
-              f"{'document_id':<20} | {'page':>4} | snippet")
     print(header)
     print("-" * len(header))
     for rank, (_, document, metadata, distance) in enumerate(rows, start=1):
@@ -93,14 +95,15 @@ def main() -> None:
         page = metadata.get("page", "?")
         marker = ">>> " if document_id == TARGET_DOCUMENT_ID else "    "
         passes = "PASS" if distance <= GATE else "FAIL"
-        print(f"{marker}{rank:>4} | {distance:>8.4f} | {passes:>10} | "
-              f"{document_id:<20} | {page:>4} | {snippet(document, 120)}")
+        print(
+            f"{marker}{rank:>4} | {distance:>8.4f} | {passes:>10} | "
+            f"{document_id:<20} | {page:>4} | {snippet(document, 120)}"
+        )
 
     # ------------------------------------------------------------------ probe B
     print()
     print("=" * 100)
-    print(f"PROBE B — is the art. 12 content ingested? "
-          f"(all chunks of {TARGET_DOCUMENT_ID})")
+    print(f"PROBE B — is the art. 12 content ingested? (all chunks of {TARGET_DOCUMENT_ID})")
     print("=" * 100)
 
     got = collection.get(
@@ -127,8 +130,7 @@ def main() -> None:
     # ------------------------------------------------------------------ probe C
     print()
     print("=" * 100)
-    print(f"PROBE C — FULL untruncated text of {TARGET_DOCUMENT_ID} chunks "
-          f"on pages 5 and 8")
+    print(f"PROBE C — FULL untruncated text of {TARGET_DOCUMENT_ID} chunks on pages 5 and 8")
     print("=" * 100)
 
     # Reuse probe B's full fetch; filter by page in Python (got is already the
@@ -142,8 +144,9 @@ def main() -> None:
     for index, (metadata, text) in enumerate(
         sorted(page_chunks, key=lambda pair: pair[0].get("page", 0)), start=1
     ):
-        print(f"--- chunk {index} | page {metadata.get('page', '?')} | "
-              f"{len(text)} chars " + "-" * 40)
+        print(
+            f"--- chunk {index} | page {metadata.get('page', '?')} | {len(text)} chars " + "-" * 40
+        )
         print(text)
         print()
 

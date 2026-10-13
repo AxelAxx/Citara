@@ -86,8 +86,7 @@ def error_presentation(exc: RagEngineError, config: VerticalConfig) -> dict[str,
         "kind": "motor",
         "title": "No se pudo completar la operación",
         "body": (
-            "La operación falló de forma inesperada. El detalle técnico de "
-            "abajo indica la causa."
+            "La operación falló de forma inesperada. El detalle técnico de abajo indica la causa."
         ),
         "technical": str(exc),
     }

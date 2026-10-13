@@ -297,9 +297,7 @@ class VectorStore:
         if self._collection is None:
             client = self._get_client()
             try:
-                self._collection = client.get_or_create_collection(
-                    name=self.collection_name
-                )
+                self._collection = client.get_or_create_collection(name=self.collection_name)
             except Exception as exc:
                 raise RetrievalError(
                     f"Could not open Collection '{self.collection_name}' at "

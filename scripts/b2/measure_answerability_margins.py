@@ -27,7 +27,7 @@ import statistics
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
@@ -289,9 +289,7 @@ def _sweep_rows(
         else:
             precision_cell = "—"  # nothing passes: precision undefined, not 0
         fa_cell = ", ".join(false_abstains) if false_abstains else "—"
-        rows.append(
-            f"| {mu:.2f} | {len(flagged)} | {recall:.2f} | {precision_cell} | {fa_cell} |"
-        )
+        rows.append(f"| {mu:.2f} | {len(flagged)} | {recall:.2f} | {precision_cell} | {fa_cell} |")
     return rows
 
 
@@ -299,7 +297,10 @@ def _git_head() -> str:
     try:
         return subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, check=True, cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=_REPO_ROOT,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unknown"
@@ -324,7 +325,7 @@ def main() -> int:
         results.append(result)
         print(f"  {case.id:<18} {result.status.value:<24} n={result.n_chunks}")
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%SZ")
     _OUT_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = _OUT_DIR / f"b2_margins_{stamp}.csv"
     md_path = _OUT_DIR / f"b2_margins_{stamp}.md"
@@ -334,22 +335,42 @@ def main() -> int:
         writer = csv.writer(handle)
         writer.writerow(
             [
-                "id", "vertical", "label", "category", "first_person", "n_chunks",
-                "d_top1", "d_rank2", "tail_mean", "tail_median",
-                "margin_additive_mean", "margin_additive_median", "margin_relative",
+                "id",
+                "vertical",
+                "label",
+                "category",
+                "first_person",
+                "n_chunks",
+                "d_top1",
+                "d_rank2",
+                "tail_mean",
+                "tail_median",
+                "margin_additive_mean",
+                "margin_additive_median",
+                "margin_relative",
                 # extra inspection columns (beyond the spec'd ones, appended last)
-                "status", "all_distances",
+                "status",
+                "all_distances",
             ]
         )
         for m in results:
             writer.writerow(
                 [
-                    m.case.id, m.case.vertical.value, m.case.label, m.case.category,
-                    m.case.first_person, m.n_chunks,
-                    _fmt(m.d_top1), _fmt(m.d_rank2), _fmt(m.tail_mean), _fmt(m.tail_median),
-                    _fmt(m.margin_additive_mean), _fmt(m.margin_additive_median),
+                    m.case.id,
+                    m.case.vertical.value,
+                    m.case.label,
+                    m.case.category,
+                    m.case.first_person,
+                    m.n_chunks,
+                    _fmt(m.d_top1),
+                    _fmt(m.d_rank2),
+                    _fmt(m.tail_mean),
+                    _fmt(m.tail_median),
+                    _fmt(m.margin_additive_mean),
+                    _fmt(m.margin_additive_median),
                     _fmt(m.margin_relative),
-                    m.status.value, ";".join(f"{d:.6f}" for d in m.all_distances),
+                    m.status.value,
+                    ";".join(f"{d:.6f}" for d in m.all_distances),
                 ]
             )
 
@@ -357,7 +378,7 @@ def main() -> int:
     lines: list[str] = []
     lines.append("# B2 — S1 top-1 margin measurement (labeled set over the live corpus)")
     lines.append("")
-    lines.append(f"- date (UTC): {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
+    lines.append(f"- date (UTC): {datetime.now(UTC).isoformat(timespec='seconds')}")
     lines.append(f"- HEAD: `{_git_head()}`")
     lines.append(f"- set: `{_SET_PATH}` ({len(cases)} queries)")
     lines.append(
@@ -380,14 +401,14 @@ def main() -> int:
 
     lines.append("## Separación por vertical × label (solo queries medidas, n_chunks ≥ 2)")
     lines.append("")
-    lines.append("| vertical | label | n | margin_relative (min/p25/med/p75/max) | margin_additive_mean (min/p25/med/p75/max) |")
+    lines.append(
+        "| vertical | label | n | margin_relative (min/p25/med/p75/max) "
+        "| margin_additive_mean (min/p25/med/p75/max) |"
+    )
     lines.append("|---|---|---|---|---|")
     for vertical in verticals:
         for label in ("answerable", "not_answerable"):
-            group = [
-                m for m in measured
-                if m.case.vertical is vertical and m.case.label == label
-            ]
+            group = [m for m in measured if m.case.vertical is vertical and m.case.label == label]
             if not group:
                 lines.append(f"| {vertical.value} | {label} | 0 | — | — |")
                 continue
@@ -429,8 +450,16 @@ def main() -> int:
     for vertical in verticals:
         vertical_measured = [m for m in measured if m.case.vertical is vertical]
         for name, margin_of, grid in (
-            ("relativa", {m.case.id: m.margin_relative for m in vertical_measured}, _SWEEP_RELATIVE),
-            ("aditiva-media", {m.case.id: m.margin_additive_mean for m in vertical_measured}, _SWEEP_ADDITIVE),
+            (
+                "relativa",
+                {m.case.id: m.margin_relative for m in vertical_measured},
+                _SWEEP_RELATIVE,
+            ),
+            (
+                "aditiva-media",
+                {m.case.id: m.margin_additive_mean for m in vertical_measured},
+                _SWEEP_ADDITIVE,
+            ),
         ):
             lines.append(f"### {vertical.value} — formulación {name}")
             lines.append("")
@@ -445,7 +474,9 @@ def main() -> int:
     for vertical_name, abstain_id, answer_id in _ANCHOR_PAIRS:
         lines.append(f"### {vertical_name}: {abstain_id} (abstain) vs {answer_id} (answer)")
         lines.append("")
-        lines.append("| id | label esperado | n | margin_relative | margin_additive_mean | status |")
+        lines.append(
+            "| id | label esperado | n | margin_relative | margin_additive_mean | status |"
+        )
         lines.append("|---|---|---|---|---|---|")
         for qid, expected in ((abstain_id, "abstain"), (answer_id, "answer")):
             m = by_id.get(qid)
@@ -455,11 +486,7 @@ def main() -> int:
                     "anchor pairs section would silently lie; fix the set or the ids."
                 )
             rel = f"{m.margin_relative:+.4f}" if m.margin_relative is not None else "—"
-            add = (
-                f"{m.margin_additive_mean:+.4f}"
-                if m.margin_additive_mean is not None
-                else "—"
-            )
+            add = f"{m.margin_additive_mean:+.4f}" if m.margin_additive_mean is not None else "—"
             lines.append(
                 f"| {qid} | {expected} | {m.n_chunks} | {rel} | {add} | {m.status.value} |"
             )

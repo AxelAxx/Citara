@@ -13,7 +13,6 @@ from html import escape
 import streamlit as st
 
 from core.engine import RagEngine
-
 from core.generate import ABSTENTION_TEXT
 from core.models import Answer, RagEngineError, VerticalConfig
 from ui.components.error_card import error_presentation, render_error_card

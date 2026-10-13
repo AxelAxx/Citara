@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import json
 
+from api.routes import health as health_route
 from core.generate import ABSTENTION_TEXT
 from core.models import OllamaUnreachableError
-
-from api.routes import health as health_route
 
 
 class _HealthyEngine:

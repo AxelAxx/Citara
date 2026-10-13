@@ -132,7 +132,9 @@ def _stream_lines(fragments: list[str]) -> list[bytes]:
         for frag in fragments
     ]
     # Final line: Ollama sends an empty content with done=True to close the stream.
-    lines.append(json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}).encode())
+    lines.append(
+        json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}).encode()
+    )
     return lines
 
 
@@ -215,14 +217,10 @@ def test_prompt_contains_formatted_blocks_with_document_id_and_page(monkeypatch)
 def test_context_header_carries_human_title_and_keeps_document_id(monkeypatch):
     bodies = _install_chat(monkeypatch)
     generator = _make_generator(
-        document_titles={
-            "BOE-A-2015-10565": "Ley 39/2015, del Procedimiento Administrativo Común"
-        }
+        document_titles={"BOE-A-2015-10565": "Ley 39/2015, del Procedimiento Administrativo Común"}
     )
 
-    generator.generate(
-        Query(text="¿plazo?"), context=[_chunk("BOE-A-2015-10565", 61)]
-    )
+    generator.generate(Query(text="¿plazo?"), context=[_chunk("BOE-A-2015-10565", 61)])
 
     prompt = bodies[0]["messages"][1]["content"]
     # Title leads, id stays: the title is what the model should attribute; the
@@ -370,10 +368,7 @@ def test_strip_abstention_phrase_removes_leading_occurrence():
     # symmetrically and the real content survives intact.
     text = f"{ABSTENTION_TEXT} Sin embargo, el artículo 5 dice otra cosa."
 
-    assert (
-        strip_abstention_phrase(text)
-        == "Sin embargo, el artículo 5 dice otra cosa."
-    )
+    assert strip_abstention_phrase(text) == "Sin embargo, el artículo 5 dice otra cosa."
 
 
 def test_strip_abstention_phrase_removes_both_edges_at_once():
@@ -408,9 +403,7 @@ def test_generate_strips_trailing_abstention_from_text_and_parts(monkeypatch):
     # End-to-end through generate(): a mixed reply loses the appended sentence
     # in both views. With markers gone, the strip keys on "not a pure
     # abstention" instead of cited-ness (the successor rule).
-    _install_chat(
-        monkeypatch, reply=f"El plazo es de un mes.\n\n{ABSTENTION_TEXT}"
-    )
+    _install_chat(monkeypatch, reply=f"El plazo es de un mes.\n\n{ABSTENTION_TEXT}")
     generator = _make_generator()
 
     answer = generator.generate(Query(text="¿plazo?"), [_chunk("doc", 1)])

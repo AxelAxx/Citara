@@ -35,7 +35,7 @@ class VerticalView(BaseModel):
     example_questions: list[str]
 
     @classmethod
-    def from_config(cls, config: VerticalConfig) -> "VerticalView":
+    def from_config(cls, config: VerticalConfig) -> VerticalView:
         """The ONE config→view mapping site, so the hidden-fields rule can't fork."""
         return cls(
             id=config.vertical.value,

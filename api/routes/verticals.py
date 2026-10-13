@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from api.schemas import VerticalsResponse, VerticalView
 from core.engine import RagEngine
 from core.ingest import load_vertical_config
 from core.models import CorpusStats, RagEngineError, Vertical
-
-from api.schemas import VerticalsResponse, VerticalView
 
 router = APIRouter()
 

@@ -77,7 +77,9 @@ def test_check_health_raises_when_ollama_unreachable(monkeypatch):
 
 def test_unreachable_and_not_pulled_are_distinct(monkeypatch):
     # Same code path, two different prerequisites → two different exceptions.
-    monkeypatch.setattr("requests.get", lambda url, timeout=None: _FakeResponse(200, {"models": []}))
+    monkeypatch.setattr(
+        "requests.get", lambda url, timeout=None: _FakeResponse(200, {"models": []})
+    )
     with pytest.raises(ModelNotPulledError):
         _make_embedder().check_health()
 

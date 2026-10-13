@@ -28,9 +28,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from core.embed import Embedder
 from core.models import (
@@ -193,9 +193,7 @@ class Chunker:
         return [Chunk(text=piece, metadata=page.metadata) for piece in pieces]
 
     @staticmethod
-    def _build_splitter(
-        chunk_size: int, chunk_overlap: int, length_function: Callable[[str], int]
-    ):
+    def _build_splitter(chunk_size: int, chunk_overlap: int, length_function: Callable[[str], int]):
         try:
             from langchain_text_splitters import RecursiveCharacterTextSplitter
         except ImportError as exc:
@@ -298,9 +296,7 @@ def _ingest_source(
         # index is the chunk's position WITHIN the page — the third component of
         # the deterministic id, so re-runs map each Chunk to the same row.
         for index, chunk in enumerate(chunker.split(page)):
-            chunk_id = make_chunk_id(
-                chunk.metadata.document_id, chunk.metadata.page, index
-            )
+            chunk_id = make_chunk_id(chunk.metadata.document_id, chunk.metadata.page, index)
             out.append(IngestedChunk(chunk_id=chunk_id, chunk=chunk))
     return out
 
@@ -370,8 +366,7 @@ def load_vertical_config(vertical: Vertical) -> VerticalConfig:
     config_path = Path("config") / f"{vertical.value}.yaml"
     if not config_path.exists():
         raise RagEngineError(
-            f"VerticalConfig not found at '{config_path}'. Expected "
-            f"config/{vertical.value}.yaml."
+            f"VerticalConfig not found at '{config_path}'. Expected config/{vertical.value}.yaml."
         )
 
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}

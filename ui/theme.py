@@ -701,12 +701,16 @@ _SPLASH_GUARD = """
 # .v-salud). health → the "salud" green accent. No colors outside these tokens.
 _ACCENT_BY_VERTICAL: dict[str, dict[str, str]] = {
     "legal": {
-        "accent": "#7C9CFF", "on": "#0C0D10",
-        "tint": "rgba(124,156,255,0.13)", "line": "rgba(124,156,255,0.36)",
+        "accent": "#7C9CFF",
+        "on": "#0C0D10",
+        "tint": "rgba(124,156,255,0.13)",
+        "line": "rgba(124,156,255,0.36)",
     },
     "health": {
-        "accent": "#46CFA6", "on": "#06120D",
-        "tint": "rgba(70,207,166,0.13)", "line": "rgba(70,207,166,0.36)",
+        "accent": "#46CFA6",
+        "on": "#06120D",
+        "tint": "rgba(70,207,166,0.13)",
+        "line": "rgba(70,207,166,0.36)",
     },
 }
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -17,11 +18,11 @@ from core.ingest import (
     Chunker,
     DocumentLoader,
     IngestedChunk,
+    IngestionResult,
     LoadedPage,
     derive_document_id,
     discover_corpus,
     ingest,
-    IngestionResult,
     make_chunk_id,
     persist,
 )
@@ -33,7 +34,6 @@ from core.models import (
     Vertical,
     VerticalConfig,
 )
-from pathlib import Path
 
 
 def _word_len(text: str) -> int:
@@ -260,7 +260,9 @@ def _ingested(doc_id: str, page: int, index: int, text: str, **md) -> IngestedCh
 
 def test_persist_embeds_texts_and_upserts_deterministic_ids():
     items = [
-        _ingested("doc-a", 1, 0, "uno", vertical=Vertical.HEALTH, source_path=Path("data/health/a.pdf")),
+        _ingested(
+            "doc-a", 1, 0, "uno", vertical=Vertical.HEALTH, source_path=Path("data/health/a.pdf")
+        ),
         _ingested("doc-a", 1, 1, "dos", section="Sección 2"),
     ]
     result = IngestionResult(documents=1, chunks=items)
@@ -286,7 +288,9 @@ def test_persist_embeds_texts_and_upserts_deterministic_ids():
 
 def test_persist_reuses_flatten_metadata_so_upsert_gets_primitives():
     items = [
-        _ingested("doc-a", 1, 0, "uno", vertical=Vertical.HEALTH, source_path=Path("data/health/a.pdf")),
+        _ingested(
+            "doc-a", 1, 0, "uno", vertical=Vertical.HEALTH, source_path=Path("data/health/a.pdf")
+        ),
         _ingested("doc-a", 1, 1, "dos", section="Sección 2"),
     ]
     store = _FakeStore()
@@ -303,9 +307,7 @@ def test_persist_reuses_flatten_metadata_so_upsert_gets_primitives():
     }
     assert metadatas[1] == {"document_id": "doc-a", "page": 1, "section": "Sección 2"}
     # Every value is a Chroma-safe primitive — no Path, no Enum leaks through.
-    assert all(
-        isinstance(v, (str, int, float, bool)) for md in metadatas for v in md.values()
-    )
+    assert all(isinstance(v, (str, int, float, bool)) for md in metadatas for v in md.values())
 
 
 def test_persist_is_idempotent_at_id_level():
@@ -317,9 +319,9 @@ def test_persist_is_idempotent_at_id_level():
     persist(result, _FakeEmbedder(), store)
     persist(result, _FakeEmbedder(), store)
 
-    assert store.upsert_calls[0]["ids"] == store.upsert_calls[1]["ids"] == [
-        make_chunk_id("doc", 2, 0)
-    ]
+    assert (
+        store.upsert_calls[0]["ids"] == store.upsert_calls[1]["ids"] == [make_chunk_id("doc", 2, 0)]
+    )
     assert store.add_calls == []  # always upsert, never add
 
 

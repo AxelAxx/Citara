@@ -47,15 +47,11 @@ class _FakeVectorStore(VectorStore):
         return self._hits
 
 
-def _hit(
-    doc_id: str, page: int, text: str, distance: float | None = 0.5, **extra
-) -> QueryHit:
+def _hit(doc_id: str, page: int, text: str, distance: float | None = 0.5, **extra) -> QueryHit:
     # distance defaults comfortably under the thresholds used in these tests, so
     # non-gate tests exercise their own concern without tripping the relevance gate.
     metadata = {"document_id": doc_id, "page": page, **extra}
-    return QueryHit(
-        id=f"{doc_id}-{page}", text=text, metadata=metadata, distance=distance
-    )
+    return QueryHit(id=f"{doc_id}-{page}", text=text, metadata=metadata, distance=distance)
 
 
 def _make_retriever(hits, embedder=None):
@@ -185,7 +181,9 @@ def test_all_hits_beyond_threshold_yield_empty_context():
     ]
     retriever, _, _ = _make_retriever(hits)
 
-    context = retriever.retrieve(Query(text="¿capital de Marte?"), top_k=3, relevance_threshold=1.05)
+    context = retriever.retrieve(
+        Query(text="¿capital de Marte?"), top_k=3, relevance_threshold=1.05
+    )
 
     assert context == []
 
@@ -248,9 +246,7 @@ def test_chunk_without_distance_still_validates():
     # Backcompat: distance is transient like ``embedding`` — every Chunk built
     # outside the retrieval path (ingest side, tests) keeps constructing
     # without it.
-    chunk = Chunk(
-        text="texto", metadata=rebuild_metadata({"document_id": "doc", "page": 1})
-    )
+    chunk = Chunk(text="texto", metadata=rebuild_metadata({"document_id": "doc", "page": 1}))
 
     assert chunk.distance is None
 

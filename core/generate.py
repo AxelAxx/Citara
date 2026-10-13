@@ -85,9 +85,31 @@ ABSTENTION_TEXT = "No encuentro esto en los documentos proporcionados."
 # matched against the whitespace-delimited token ending at the candidate dot.
 _ABBREVIATION_ENDINGS = frozenset(
     {
-        "art.", "arts.", "núm.", "núms.", "apdo.", "apdos.", "pág.", "págs.",
-        "cap.", "caps.", "p.", "ej.", "p.ej.", "vid.", "cfr.", "op.", "cit.",
-        "ss.", "sr.", "sra.", "dr.", "dra.", "d.", "dña.", "etc.",
+        "art.",
+        "arts.",
+        "núm.",
+        "núms.",
+        "apdo.",
+        "apdos.",
+        "pág.",
+        "págs.",
+        "cap.",
+        "caps.",
+        "p.",
+        "ej.",
+        "p.ej.",
+        "vid.",
+        "cfr.",
+        "op.",
+        "cit.",
+        "ss.",
+        "sr.",
+        "sra.",
+        "dr.",
+        "dra.",
+        "d.",
+        "dña.",
+        "etc.",
     }
 )
 
@@ -278,8 +300,7 @@ def verify_anchors(
         # repair lands on a real fragment index).
         best_by_citation = {
             citation_n: max(
-                (_cosine(sentence_embedding, context[pos].embedding), pos)
-                for pos in positions
+                (_cosine(sentence_embedding, context[pos].embedding), pos) for pos in positions
             )
             for citation_n, positions in chunks_by_citation.items()
         }
@@ -384,9 +405,7 @@ def _parts_from_anchors(
     """
     chunks_by_sentence: dict[int, list[int]] = {}
     for anchor in anchors:
-        chunks_by_sentence.setdefault(anchor.sentence_index, []).append(
-            anchor.chunk_index
-        )
+        chunks_by_sentence.setdefault(anchor.sentence_index, []).append(anchor.chunk_index)
 
     parts: list[AnswerPart] = []
     for index, sentence in enumerate(sentences, 1):
@@ -543,9 +562,7 @@ class Generator:
         # Answer.citations); in "off" mode the answer is one TextPart. Both
         # views come from the ONE resolution site (_resolve_parts), so a
         # stripped edge abstention disappears from text and parts at once.
-        fragment_to_citation = self._fragment_index_to_citation_index(
-            context, citations
-        )
+        fragment_to_citation = self._fragment_index_to_citation_index(context, citations)
         text, parts = self._resolve_parts(text, context, fragment_to_citation)
         return Answer(text=text, citations=citations, parts=parts)
 
@@ -608,9 +625,7 @@ class Generator:
 
     # --- final resolution: clean text → typed parts (both citation modes) ----
 
-    def parts_for_text(
-        self, text: str, context: RetrievedContext
-    ) -> tuple[str, list[AnswerPart]]:
+    def parts_for_text(self, text: str, context: RetrievedContext) -> tuple[str, list[AnswerPart]]:
         """Resolve a COMPLETED reply into (final text, typed parts) — the one
         public seam for the streaming close.
 
@@ -621,9 +636,7 @@ class Generator:
         the parts.
         """
         citations = self._citations_from_context(context)
-        fragment_to_citation = self._fragment_index_to_citation_index(
-            context, citations
-        )
+        fragment_to_citation = self._fragment_index_to_citation_index(context, citations)
         return self._resolve_parts(text, context, fragment_to_citation)
 
     def _resolve_parts(
@@ -677,9 +690,7 @@ class Generator:
         # own: no new decision path in the API, no prose matching anywhere.
         if (
             self.answerability_gate_enabled
-            and evaluate_answerability(
-                context, margin_threshold=self.answerability_margin
-            )
+            and evaluate_answerability(context, margin_threshold=self.answerability_margin)
             is SufficiencyVerdict.INSUFFICIENT
         ):
             return ABSTENTION_TEXT, [TextPart(text=ABSTENTION_TEXT)]
@@ -691,9 +702,7 @@ class Generator:
 
     # --- the anchor pass (inline_citation_mode="structured") -----------------
 
-    def anchor_citations(
-        self, sentences: list[str], context: RetrievedContext
-    ) -> list[CiteAnchor]:
+    def anchor_citations(self, sentences: list[str], context: RetrievedContext) -> list[CiteAnchor]:
         """Second LLM pass: anchor each supported sentence to its fragment.
 
         Sends numbered sentences + the SAME numbered fragment blocks the
@@ -719,13 +728,9 @@ class Generator:
             )
         except RagEngineError:
             return []
-        return _parse_anchor_json(
-            raw, num_sentences=len(sentences), num_chunks=len(context)
-        )
+        return _parse_anchor_json(raw, num_sentences=len(sentences), num_chunks=len(context))
 
-    def _build_anchor_prompt(
-        self, sentences: list[str], context: RetrievedContext
-    ) -> str:
+    def _build_anchor_prompt(self, sentences: list[str], context: RetrievedContext) -> str:
         """The anchor pass's user turn: numbered sentences + numbered fragments.
 
         Fragments reuse :meth:`_format_block` verbatim so the anchor model sees
@@ -733,12 +738,10 @@ class Generator:
         fragment indexing across both calls, no second numbering scheme.
         """
         numbered = "\n".join(
-            f"{index}. {sentence.strip()}"
-            for index, sentence in enumerate(sentences, 1)
+            f"{index}. {sentence.strip()}" for index, sentence in enumerate(sentences, 1)
         )
         blocks = "\n\n".join(
-            self._format_block(index, chunk)
-            for index, chunk in enumerate(context, 1)
+            self._format_block(index, chunk) for index, chunk in enumerate(context, 1)
         )
         return (
             f"FRASES DE LA RESPUESTA:\n{numbered}\n\n"
@@ -757,11 +760,7 @@ class Generator:
         blocks = "\n\n".join(self._format_block(i, chunk) for i, chunk in enumerate(context, 1))
         # Spanish framing because the model answers in Spanish (G5); the binding
         # rules themselves live in the vertical's system_prompt, not here.
-        return (
-            "Contexto recuperado de los documentos:\n\n"
-            f"{blocks}\n\n"
-            f"Pregunta: {query.text}"
-        )
+        return f"Contexto recuperado de los documentos:\n\n{blocks}\n\nPregunta: {query.text}"
 
     def _format_block(self, index: int, chunk) -> str:
         """One citable context block: provenance header + text.
@@ -779,10 +778,7 @@ class Generator:
         title = self.document_titles.get(md.document_id)
         if title is None:
             return f"[{index}] [Documento: {md.document_id}, pág. {md.page}]\n{chunk.text}"
-        return (
-            f"[{index}] [Documento: {title} — {md.document_id}, "
-            f"pág. {md.page}]\n{chunk.text}"
-        )
+        return f"[{index}] [Documento: {title} — {md.document_id}, pág. {md.page}]\n{chunk.text}"
 
     # --- citations (FR9 / AC2) ----------------------------------------------
 
@@ -823,13 +819,8 @@ class Generator:
         its deduped Citation, which is exactly the ``n`` a CitePart must carry:
         the renderer looks up ``Answer.citations[n - 1]``.
         """
-        position = {
-            (c.document_id, c.page): index for index, c in enumerate(citations, 1)
-        }
-        return [
-            position[(chunk.metadata.document_id, chunk.metadata.page)]
-            for chunk in context
-        ]
+        position = {(c.document_id, c.page): index for index, c in enumerate(citations, 1)}
+        return [position[(chunk.metadata.document_id, chunk.metadata.page)] for chunk in context]
 
     # --- LLM call (FR7) + preflight (AC7) ------------------------------------
 
@@ -1030,9 +1021,7 @@ class Generator:
             "options": {"temperature": self.temperature},
         }
         try:
-            response = requests.post(
-                url, json=body, timeout=_CHAT_TIMEOUT_SECONDS, stream=True
-            )
+            response = requests.post(url, json=body, timeout=_CHAT_TIMEOUT_SECONDS, stream=True)
         except (requests.exceptions.RequestException, OSError) as exc:
             # Raised before any fragment is yielded — fail-fast, loud, actionable.
             raise OllamaUnreachableError(

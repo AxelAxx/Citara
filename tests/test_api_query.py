@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import json
 
+from api.routes.query import _stream_events
 from core.engine import StreamedAnswer
 from core.generate import ABSTENTION_TEXT
 from core.models import Citation, CitePart, TextPart
-
-from api.routes.query import _stream_events
 
 
 def _collect(events) -> list[tuple[str, dict]]:
@@ -33,9 +32,7 @@ def test_done_serves_anchored_parts_from_resolve_parts():
         return full_text, [TextPart(text="El plazo es de un mes."), CitePart(n=1)]
 
     streamed = StreamedAnswer(
-        part_stream=iter(
-            [TextPart(text="El plazo "), TextPart(text="es de un mes.")]
-        ),
+        part_stream=iter([TextPart(text="El plazo "), TextPart(text="es de un mes.")]),
         citations=[_citation()],
         resolve_parts=resolve,
     )
@@ -123,9 +120,7 @@ def test_pure_soft_decline_with_citations_is_abstention():
 
 def test_hard_abstention_done_is_single_textpart_without_resolve_call():
     def boom(full_text: str):
-        raise AssertionError(
-            "resolve_parts must not run on an abstention (nothing to anchor)"
-        )
+        raise AssertionError("resolve_parts must not run on an abstention (nothing to anchor)")
 
     streamed = StreamedAnswer(
         part_stream=iter([TextPart(text=ABSTENTION_TEXT)]),

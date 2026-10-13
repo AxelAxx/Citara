@@ -24,7 +24,6 @@ from core.models import (
     RagEngineError,
     VerticalConfig,
 )
-
 from ui.components.chat_header import render_chat_header
 
 # error_presentation is shared public API: the boot/preflight cards here and the
@@ -41,7 +40,6 @@ from ui.state import (
     vertical_options,
 )
 from ui.theme import LOGO_PATH, inject_theme, render_splash
-
 
 # --- cached construction -----------------------------------------------------
 
@@ -118,8 +116,7 @@ def main() -> None:
             kind="config",
             title="No hay ninguna Vertical configurada",
             body=escape(
-                "Añade config/<vertical>.yaml (p. ej. config/health.yaml) antes "
-                "de arrancar la app."
+                "Añade config/<vertical>.yaml (p. ej. config/health.yaml) antes de arrancar la app."
             ),
             key_suffix="boot",
         )

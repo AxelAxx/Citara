@@ -109,9 +109,7 @@ class Retriever:
         # reporting them) cannot be shown to be relevant, so it is dropped too —
         # assuming relevance would silently reopen the noise path the gate closes.
         relevant = [
-            hit
-            for hit in hits
-            if hit.distance is not None and hit.distance <= relevance_threshold
+            hit for hit in hits if hit.distance is not None and hit.distance <= relevance_threshold
         ]
 
         # Order preserved: each QueryHit → Chunk, nearest-first as Chroma returned.

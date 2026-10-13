@@ -13,7 +13,6 @@ import streamlit as st
 
 from core.engine import RagEngine
 from core.models import RagEngineError, VerticalConfig
-
 from ui.components.error_card import error_presentation, render_error_card
 from ui.state import KEY_CORPUS_OPEN
 
@@ -35,8 +34,7 @@ def _corpus_dialog(engine: RagEngine, config: VerticalConfig) -> None:
         return
     chunks_fmt = f"{stats.chunk_count:,}".replace(",", " ")  # mock: "3 412"
     rows = "".join(
-        f'<div class="file-row">{escape(document_id)}</div>'
-        for document_id in stats.document_ids
+        f'<div class="file-row">{escape(document_id)}</div>' for document_id in stats.document_ids
     )
     with st.container(key="citara-corpus"):
         st.markdown(

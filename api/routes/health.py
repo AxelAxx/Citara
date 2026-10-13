@@ -5,12 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from api.dependencies import get_engine
+from api.errors import http_error_for
 from core.generate import ABSTENTION_TEXT
 from core.ingest import load_vertical_config
 from core.models import RagEngineError, Vertical
-
-from api.dependencies import get_engine
-from api.errors import http_error_for
 
 router = APIRouter()
 
@@ -20,8 +19,8 @@ def health() -> JSONResponse:
     """One aggregated check_health() (Embedder + Generator preflights).
 
     The preflight is server/model-level and identical for every Vertical, so it
-    runs against the FIRST configured Vertical (the same values[0] convention
-    as the Streamlit main) — no vertical is special-cased.
+    runs against the FIRST configured Vertical (enum iteration order) — no
+    vertical is special-cased.
     """
     vertical = next(iter(Vertical))
     config = load_vertical_config(vertical)

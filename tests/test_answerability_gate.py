@@ -139,9 +139,7 @@ def test_resolve_sufficient_leaves_resolution_untouched(monkeypatch) -> None:
     _stub_anchor_pass(monkeypatch)
     generator = _gate_generator()
 
-    text, parts = generator.parts_for_text(
-        "El plazo es de un mes.", _context(_STANDOUT)
-    )
+    text, parts = generator.parts_for_text("El plazo es de un mes.", _context(_STANDOUT))
 
     assert text == "El plazo es de un mes."
     assert parts == [TextPart(text="El plazo es de un mes."), CitePart(n=1)]

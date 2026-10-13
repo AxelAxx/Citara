@@ -175,13 +175,21 @@ def test_query_forwards_top_k_and_where_and_maps_results():
 
     # mapped to the typed minimum retrieve.py needs
     assert hits == [
-        QueryHit(id="id-a", text="texto a", metadata={"document_id": "doc", "page": 1}, distance=0.12),
-        QueryHit(id="id-b", text="texto b", metadata={"document_id": "doc", "page": 2}, distance=0.34),
+        QueryHit(
+            id="id-a", text="texto a", metadata={"document_id": "doc", "page": 1}, distance=0.12
+        ),
+        QueryHit(
+            id="id-b", text="texto b", metadata={"document_id": "doc", "page": 2}, distance=0.34
+        ),
     ]
 
 
 def test_query_omits_where_when_none():
-    response = {"ids": [["id-a"]], "documents": [["t"]], "metadatas": [[{"document_id": "d", "page": 1}]]}
+    response = {
+        "ids": [["id-a"]],
+        "documents": [["t"]],
+        "metadatas": [[{"document_id": "d", "page": 1}]],
+    }
     collection = _FakeCollection(count=1, query_response=response)
     store = _make_store(collection)
 
@@ -243,7 +251,9 @@ def test_collection_open_failure_raises_retrieval_error():
 
 
 def test_collection_name_is_passed_through_unchanged():
-    collection = _FakeCollection(count=1, query_response={"ids": [[]], "documents": [[]], "metadatas": [[]]})
+    collection = _FakeCollection(
+        count=1, query_response={"ids": [[]], "documents": [[]], "metadatas": [[]]}
+    )
     client = _FakeClient(collection)
     store = VectorStore(collection_name="legal_chunks", client=client)
 

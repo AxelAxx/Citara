@@ -8,13 +8,12 @@ from collections.abc import Iterator
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 
-from core.engine import StreamedAnswer
-from core.generate import ABSTENTION_TEXT
-from core.models import CitePart, RagEngineError, TextPart
-
 from api.dependencies import get_engine
 from api.errors import http_error_for
 from api.schemas import QueryRequest
+from core.engine import StreamedAnswer
+from core.generate import ABSTENTION_TEXT
+from core.models import CitePart, RagEngineError, TextPart
 
 router = APIRouter()
 
@@ -39,8 +38,8 @@ def _stream_events(streamed: StreamedAnswer) -> Iterator[dict]:
     StreamedAnswer and assert the emitted frames without the ASGI stack.
     """
     # citations FIRST (fixed the instant retrieval returned): the front
-    # reserves the sources/abstention slot before any text arrives — the
-    # same ordering app.py's label_slot relied on. Its is_abstention only
+    # reserves the sources/abstention slot before any text arrives. Its
+    # is_abstention only
     # covers the EARLY hard path (empty context ⇒ no citations); the done
     # event below is the authoritative resolution, because the soft
     # abstention is only detectable once the full text is known.
@@ -69,9 +68,7 @@ def _stream_events(streamed: StreamedAnswer) -> Iterator[dict]:
         _, code = http_error_for(exc)
         yield {
             "event": "error",
-            "data": json.dumps(
-                {"error_code": code, "message": str(exc)}, ensure_ascii=False
-            ),
+            "data": json.dumps({"error_code": code, "message": str(exc)}, ensure_ascii=False),
         }
         return
     if not streamed.citations:
